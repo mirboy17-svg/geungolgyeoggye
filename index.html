@@ -110,6 +110,9 @@
           const [toastMessage, setToastMessage] = useState('');
           const [isSyncing, setIsSyncing] = useState(false);
           const [lastSyncTime, setLastSyncTime] = useState('');
+          
+          // 💡 상세 업로드 진행 상태 관리를 위한 state 추가
+          const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
           // 🚀 [중요] 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
@@ -140,7 +143,7 @@
             }
           }, [toastMessage, isSyncing]);
 
-          // 🚀 분할 전송 시스템
+          // 🚀 분할 전송 시스템 및 진행률 UI 연동
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             if (isAutoSave) {
@@ -192,39 +195,61 @@
                 })
               };
 
-              setToastMessage('☁️ 스프레드시트 데이터 전송 중...');
+              // 💡 진행률 계산 변수 설정
+              const totalTasks = 1 + mediaQueue.length; // 스프레드시트 1개 + 미디어 파일 수
+              let completedTasks = 0;
+
+              const updateProgress = (text) => {
+                const percentage = Math.round((completedTasks / totalTasks) * 100);
+                setUploadProgress({ current: completedTasks, total: totalTasks, text, percentage });
+              };
+
+              updateProgress('☁️ 텍스트 데이터(스프레드시트) 전송 중...');
+              
               let response = await fetch(fetchUrl, {
                 method: 'POST',
+                // 🔥 수정됨: CORS 에러(Failed to fetch)를 유발하는 Cache-Control 헤더 제거
                 headers: { 
-                  'Content-Type': 'text/plain;charset=utf-8',
-                  'Cache-Control': 'no-cache, no-store, must-revalidate'
+                  'Content-Type': 'text/plain;charset=utf-8'
                 },
                 body: JSON.stringify(spreadsheetPayload)
               });
               let result = await response.json();
               if (result.status !== "success") throw new Error(result.message);
 
+              completedTasks++;
+              updateProgress('☁️ 미디어 파일 전송 준비 중...');
+
               const totalMedia = mediaQueue.length;
               for (let i = 0; i < totalMedia; i++) {
                 const mediaItem = mediaQueue[i];
                 const isVideo = mediaItem.fileName.includes('동영상');
-                setToastMessage(`☁️ 첨부 파일 업로드 중... (${i + 1}/${totalMedia}) - ${isVideo ? '동영상' : '사진'}`);
+                
+                updateProgress(`업로드 중 (${i + 1}/${totalMedia}): ${isVideo ? '동영상' : '사진'}`);
                 
                 response = await fetch(fetchUrl, {
                   method: 'POST',
+                  // 🔥 수정됨: CORS 에러(Failed to fetch)를 유발하는 Cache-Control 헤더 제거
                   headers: { 
-                    'Content-Type': 'text/plain;charset=utf-8',
-                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                    'Content-Type': 'text/plain;charset=utf-8'
                   },
                   body: JSON.stringify(mediaItem)
                 });
                 result = await response.json();
                 if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
+                
+                completedTasks++;
+                updateProgress(`업로드 완료 (${i + 1}/${totalMedia})`);
               }
+              
+              // 100% 완료 처리
+              completedTasks = totalTasks;
+              updateProgress('✅ 모든 데이터 전송 완료!');
               
               const now = new Date();
               setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
               
+              // 약간의 딜레이 후 팝업 띄우기 (진행률 100%를 보여주기 위함)
               setTimeout(() => {
                 if(window.confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
                   localStorage.removeItem('localProcessData');
@@ -233,13 +258,13 @@
                 } else {
                   setToastMessage('✅ 모든 데이터 및 파일 전송 완료!');
                 }
-              }, 500);
+                setIsSyncing(false);
+              }, 600);
 
             } catch (error) {
               console.error("업로드 실패:", error);
               alert("🚨 저장 실패 상세 원인:\n" + error.message);
               setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
-            } finally {
               setIsSyncing(false);
             }
           };
@@ -337,11 +362,44 @@
             <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
               <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
                 
-                {/* Toast 알림창 */}
-                {toastMessage && (
+                {/* 🔥 상세 진행률 오버레이 모달 (isSyncing 일 때만 화면을 덮음) */}
+                {isSyncing && (
+                  <div className="absolute inset-0 bg-slate-900/80 z-[100] flex items-center justify-center p-6 backdrop-blur-sm transition-opacity">
+                    <div className="bg-white rounded-2xl p-6 w-full shadow-2xl flex flex-col items-center">
+                      <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                      <h3 className="text-xl font-black text-slate-800 mb-2">서버 전송 중...</h3>
+                      <p className="text-sm font-bold text-slate-500 mb-6 text-center h-5">
+                        {uploadProgress.text}
+                      </p>
+                      
+                      {/* 프로그레스 바 영역 */}
+                      <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden border border-slate-200 shadow-inner">
+                        <div 
+                          className="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden" 
+                          style={{ width: `${uploadProgress.percentage}%` }}
+                        >
+                          {/* 진행률 바 애니메이션 효과 */}
+                          <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
+                        </div>
+                      </div>
+                      
+                      <div className="w-full flex justify-between items-center px-1">
+                        <span className="text-xs font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
+                        <span className="text-sm font-black text-blue-600">{uploadProgress.percentage}%</span>
+                      </div>
+                      
+                      <p className="text-[10px] text-slate-400 mt-5 text-center leading-tight">
+                        데이터 용량에 따라 시간이 걸릴 수 있습니다.<br/>화면을 끄거나 앱을 종료하지 마세요.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Toast 알림창 (오버레이가 없을 때만 표시) */}
+                {toastMessage && !isSyncing && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
-                      {isSyncing || toastMessage.includes('처리 중') ? <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
+                      <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
                       {toastMessage}
                     </div>
                   </div>
