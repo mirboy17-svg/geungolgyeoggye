@@ -53,7 +53,7 @@
           { value: 5, label: '초과근무시간(1일8시간 이상)' }
         ];
 
-        // 초기 양식
+        // 초기 빈 공정 양식
         const emptyProcess = () => ({
           id: Date.now().toString(),
           processName: '',
@@ -74,26 +74,25 @@
           const [lastSyncTime, setLastSyncTime] = useState('');
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
-          // 🚀 구글 앱스 스크립트 웹앱 URL (발급받은 URL 입력)
-          const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-pVngVutLqxegRdWdaI2BvgjNTDUMiRdKDE3dVGrZ9_1FoWFDvvRQLceOUz-74m8TgA/exec'; 
+          // 🚀 [중요] 발급받은 '웹 앱 URL'을 아래 따옴표 안에 반드시 붙여넣어 주세요!
+          const GAS_WEB_APP_URL = '여기에_복사한_웹앱_URL을_붙여넣으세요'; 
 
           useEffect(() => {
             try {
               const savedData = localStorage.getItem('localProcessData');
               if (savedData) {
                 const parsedData = JSON.parse(savedData);
-                // 💡 화면 멈춤 방지용 안전 장치: 과거 저장된 데이터에 photos/videos 항목이 없어도 튕기지 않도록 기본값(배열) 강제 적용
                 const safeData = parsedData.map(p => ({
-                  ...emptyProcess(), // 기본 양식을 먼저 깔고
-                  ...p,              // 과거 데이터를 덮어씌운 뒤
-                  photos: Array.isArray(p.photos) ? p.photos.filter(photo => photo !== null) : [], // 예전 버전의 null 사진 제거
-                  videos: Array.isArray(p.videos) ? p.videos : [] // 동영상 항목이 아예 없었을 경우 빈 배열로 세팅
+                  ...emptyProcess(),
+                  ...p,
+                  photos: Array.isArray(p.photos) ? p.photos.filter(photo => photo !== null) : [],
+                  videos: Array.isArray(p.videos) ? p.videos : []
                 }));
                 setProcesses(safeData);
               }
             } catch (error) {
               console.error("데이터 복구 실패, 초기화합니다.", error);
-              localStorage.removeItem('localProcessData'); // 데이터가 완전히 망가졌을 경우 초기화
+              localStorage.removeItem('localProcessData');
             }
           }, []);
 
@@ -114,9 +113,12 @@
               setToastMessage('☁️ 구글 스프레드시트 및 드라이브에 업로드 중입니다...');
               
               try {
+                // 작성된 공정명들을 모두 추출하여 쉼표로 연결합니다.
+                const processNamesStr = data.map((p, index) => p.processName || `미지정공정${index + 1}`).join(', ');
+                
                 const payload = {
                   folderId: TARGET_FOLDER_ID,
-                  spreadsheetName: `근골조사표_종합_${new Date().toISOString().slice(0,10)}`,
+                  spreadsheetName: `근골조사표(${processNamesStr})`,
                   processes: data.map((p, index) => {
                     const processName = p.processName || `미지정_공정_${index + 1}`;
                     return {
@@ -142,16 +144,14 @@
                   })
                 };
 
+                // URL 미설정 시 방어 코드
                 if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
-                  // 개발 시뮬레이션용 딜레이
-                  await new Promise(resolve => setTimeout(resolve, 2000));
-                  const now = new Date();
-                  setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
-                  setToastMessage('✅ 구글 드라이브 동기화 시뮬레이션 완료! (실제 API URL 필요)');
+                  alert("소스코드에 구글 앱스 스크립트 URL이 입력되지 않았습니다!");
                   setIsSyncing(false);
                   return;
                 }
 
+                // API 호출
                 const response = await fetch(GAS_WEB_APP_URL, {
                   method: 'POST',
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -163,7 +163,18 @@
                 if (result.status === "success") {
                   const now = new Date();
                   setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
-                  setToastMessage('✅ 스프레드시트 생성 및 미디어 저장 완료!');
+                  
+                  // 저장 완료 후 자동 초기화 로직 (반복 작업 최적화)
+                  setTimeout(() => {
+                    if(confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
+                      localStorage.removeItem('localProcessData');
+                      setProcesses([emptyProcess()]);
+                      setToastMessage('✨ 새로운 조사를 시작합니다.');
+                    } else {
+                      setToastMessage('✅ 전송 완료! (내용은 유지됩니다)');
+                    }
+                  }, 500); // UI 자연스러움을 위해 약간의 딜레이
+
                 } else {
                   throw new Error(result.message);
                 }
@@ -184,6 +195,7 @@
 
           const handleManualSave = () => saveToServer(processes, false);
 
+          // 수동 초기화 버튼 로직
           const handleReset = () => {
             if(confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
@@ -204,6 +216,15 @@
           const handleMediaCapture = (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
+
+            // 스마트폰 튕김 방지용 용량 제한 (사진 10MB, 영상 30MB)
+            const maxSizeMB = type === 'photo' ? 10 : 30; 
+            if (file.size > maxSizeMB * 1024 * 1024) {
+              alert(`⚠️ 파일 용량이 너무 큽니다!\n${type === 'photo' ? '사진은 10MB' : '동영상은 30MB'} 이하만 첨부 가능합니다.`);
+              e.target.value = null;
+              return;
+            }
+
             const reader = new FileReader();
             reader.onloadend = () => {
                 setProcesses(processes.map(p => {
@@ -266,11 +287,13 @@
                       )}
                     </div>
                   </div>
+                  
                   <div className="flex items-center gap-2">
                     <button 
                       onClick={handleReset}
                       disabled={isSyncing}
                       className="flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors bg-blue-500 hover:bg-blue-400 active:scale-95"
+                      title="새로 작성하기"
                     >
                       <RefreshCw className="w-4 h-4" /> 초기화
                     </button>
@@ -297,8 +320,6 @@
                   {processes.map((process, index) => {
                     const score = process.workload * process.frequency;
                     const scoreInfo = getScoreInfo(score);
-                    
-                    // 안전 장치: photos/videos가 undefined일 경우 빈 배열로 처리
                     const safePhotos = process.photos || [];
                     const safeVideos = process.videos || [];
 
