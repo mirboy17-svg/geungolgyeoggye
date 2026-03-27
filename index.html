@@ -66,6 +66,43 @@
           videos: []
         });
 
+        // 💡 이미지 최적화(압축) 함수: 5MB 사진을 100~200KB로 획기적으로 줄여줍니다.
+        const compressImage = (file) => {
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+              const img = new Image();
+              img.src = event.target.result;
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 1280;
+                const MAX_HEIGHT = 1280;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                  if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                  }
+                } else {
+                  if (height > MAX_HEIGHT) {
+                    width *= MAX_HEIGHT / height;
+                    height = MAX_HEIGHT;
+                  }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                // 품질 0.6으로 압축하여 Base64 반환
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
+              };
+            };
+          });
+        };
+
         // --- 메인 앱 ---
         function MobileApp() {
           const [processes, setProcesses] = useState([emptyProcess()]);
@@ -74,8 +111,8 @@
           const [lastSyncTime, setLastSyncTime] = useState('');
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
-          // 🚀 [중요] 발급받은 '웹 앱 URL'을 아래 따옴표 안에 반드시 붙여넣어 주세요!
-          const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-pVngVutLqxegRdWdaI2BvgjNTDUMiRdKDE3dVGrZ9_1FoWFDvvRQLceOUz-74m8TgA/exec'; 
+          // 🚀 [중요] 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
+          const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxof1_-oWTbesoOgWGjjQzbfOFt-e9hZJCQSWpp5ND4ETxSGmtRHCtx8-65ml74v2HAXQ/exec'; 
 
           useEffect(() => {
             try {
@@ -91,100 +128,115 @@
                 setProcesses(safeData);
               }
             } catch (error) {
-              console.error("데이터 복구 실패, 초기화합니다.", error);
               localStorage.removeItem('localProcessData');
             }
           }, []);
 
           useEffect(() => {
-            if (toastMessage) {
+            if (toastMessage && !isSyncing) {
               const timer = setTimeout(() => setToastMessage(''), 3000);
               return () => clearTimeout(timer);
             }
-          }, [toastMessage]);
+          }, [toastMessage, isSyncing]);
 
+          // 🚀 분할 전송 시스템 (용량 초과 및 서버 타임아웃 완벽 해결)
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
-            
             if (isAutoSave) {
               setToastMessage('📱 기기 내부 임시 저장 완료');
-            } else {
-              setIsSyncing(true);
-              setToastMessage('☁️ 구글 스프레드시트 및 드라이브에 업로드 중입니다...');
-              
-              try {
-                // 작성된 공정명들을 모두 추출하여 쉼표로 연결합니다.
-                const processNamesStr = data.map((p, index) => p.processName || `미지정공정${index + 1}`).join(', ');
+              return;
+            }
+
+            if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
+              alert("소스코드에 구글 앱스 스크립트 URL이 입력되지 않았습니다!");
+              return;
+            }
+
+            setIsSyncing(true);
+            
+            try {
+              // 1. 대기열(Queue) 생성: 텍스트 덩어리와 미디어 파일들을 분리
+              const mediaQueue = [];
+              const nowForName = new Date();
+              const timeStr = `${nowForName.getHours()}${nowForName.getMinutes()}${nowForName.getSeconds()}`;
+              const processNamesStr = data.map((p, index) => p.processName || `미지정공정${index + 1}`).join(', ');
+
+              const spreadsheetPayload = {
+                type: 'spreadsheet',
+                folderId: TARGET_FOLDER_ID,
+                spreadsheetName: `근골조사표(${processNamesStr})_${nowForName.toISOString().slice(0,10)}_${timeStr}`,
+                processes: data.map((p, index) => {
+                  const processName = p.processName || `미지정_공정_${index + 1}`;
+                  
+                  // 미디어 파일들은 별도의 배열에 순서대로 담아둡니다.
+                  (p.photos || []).forEach((base64, i) => {
+                    mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: base64 });
+                  });
+                  (p.videos || []).forEach((base64, i) => {
+                    mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: base64 });
+                  });
+
+                  return {
+                    sheetName: processName,
+                    info: {
+                      "공정명": processName,
+                      "작업내용": p.workContent,
+                      "작업시간": p.workTime,
+                      "작업정보": p.workInfo,
+                      "작업부하(A)": p.workload,
+                      "작업빈도(B)": p.frequency,
+                      "총점": p.workload * p.frequency
+                    }
+                  };
+                })
+              };
+
+              // 2. 가벼운 텍스트(스프레드시트) 데이터를 먼저 전송 (1초 내 완료)
+              setToastMessage('☁️ 스프레드시트 데이터 전송 중...');
+              let response = await fetch(GAS_WEB_APP_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(spreadsheetPayload)
+              });
+              let result = await response.json();
+              if (result.status !== "success") throw new Error(result.message);
+
+              // 3. 미디어 파일들을 하나씩 순서대로 전송 (용량 초과 원천 차단)
+              const totalMedia = mediaQueue.length;
+              for (let i = 0; i < totalMedia; i++) {
+                const mediaItem = mediaQueue[i];
+                const isVideo = mediaItem.fileName.includes('동영상');
+                setToastMessage(`☁️ 첨부 파일 업로드 중... (${i + 1}/${totalMedia}) - ${isVideo ? '동영상' : '사진'}`);
                 
-                const payload = {
-                  folderId: TARGET_FOLDER_ID,
-                  spreadsheetName: `근골조사표(${processNamesStr})`,
-                  processes: data.map((p, index) => {
-                    const processName = p.processName || `미지정_공정_${index + 1}`;
-                    return {
-                      sheetName: processName,
-                      info: {
-                        "공정명": processName,
-                        "작업내용": p.workContent,
-                        "작업시간": p.workTime,
-                        "작업정보": p.workInfo,
-                        "작업부하(A)": p.workload,
-                        "작업빈도(B)": p.frequency,
-                        "총점": p.workload * p.frequency
-                      },
-                      photos: (p.photos || []).map((base64, i) => ({
-                        fileName: `${processName}_사진_${i + 1}.jpg`,
-                        data: base64
-                      })),
-                      videos: (p.videos || []).map((base64, i) => ({
-                        fileName: `${processName}_동영상_${i + 1}.mp4`,
-                        data: base64
-                      }))
-                    };
-                  })
-                };
-
-                // URL 미설정 시 방어 코드
-                if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
-                  alert("소스코드에 구글 앱스 스크립트 URL이 입력되지 않았습니다!");
-                  setIsSyncing(false);
-                  return;
-                }
-
-                // API 호출
-                const response = await fetch(GAS_WEB_APP_URL, {
+                response = await fetch(GAS_WEB_APP_URL, {
                   method: 'POST',
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                  body: JSON.stringify(payload)
+                  body: JSON.stringify(mediaItem)
                 });
-                
-                const result = await response.json();
-                
-                if (result.status === "success") {
-                  const now = new Date();
-                  setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
-                  
-                  // 저장 완료 후 자동 초기화 로직 (반복 작업 최적화)
-                  setTimeout(() => {
-                    if(confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
-                      localStorage.removeItem('localProcessData');
-                      setProcesses([emptyProcess()]);
-                      setToastMessage('✨ 새로운 조사를 시작합니다.');
-                    } else {
-                      setToastMessage('✅ 전송 완료! (내용은 유지됩니다)');
-                    }
-                  }, 500); // UI 자연스러움을 위해 약간의 딜레이
-
-                } else {
-                  throw new Error(result.message);
-                }
-
-              } catch (error) {
-                console.error("업로드 실패:", error);
-                setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
-              } finally {
-                setIsSyncing(false);
+                result = await response.json();
+                if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
               }
+              
+              // 4. 모든 업로드 완료 처리
+              const now = new Date();
+              setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
+              
+              setTimeout(() => {
+                if(confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
+                  localStorage.removeItem('localProcessData');
+                  setProcesses([emptyProcess()]);
+                  setToastMessage('✨ 새로운 조사를 시작합니다.');
+                } else {
+                  setToastMessage('✅ 모든 데이터 및 파일 전송 완료!');
+                }
+              }, 500);
+
+            } catch (error) {
+              console.error("업로드 실패:", error);
+              alert("🚨 저장 실패 상세 원인:\n" + error.message);
+              setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
+            } finally {
+              setIsSyncing(false);
             }
           };
 
@@ -195,7 +247,6 @@
 
           const handleManualSave = () => saveToServer(processes, false);
 
-          // 수동 초기화 버튼 로직
           const handleReset = () => {
             if(confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
@@ -213,30 +264,43 @@
             setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
-          const handleMediaCapture = (e, processId, type) => {
+          const handleMediaCapture = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            // 스마트폰 튕김 방지용 용량 제한 (사진 10MB, 영상 30MB)
-            const maxSizeMB = type === 'photo' ? 10 : 30; 
+            // 안드로이드/아이폰 메모리 보호용 제한
+            const maxSizeMB = type === 'photo' ? 10 : 50; 
             if (file.size > maxSizeMB * 1024 * 1024) {
-              alert(`⚠️ 파일 용량이 너무 큽니다!\n${type === 'photo' ? '사진은 10MB' : '동영상은 30MB'} 이하만 첨부 가능합니다.`);
+              alert(`⚠️ 파일 용량이 너무 큽니다!\n${type === 'photo' ? '사진은 10MB' : '동영상은 50MB'} 이하만 첨부 가능합니다.`);
               e.target.value = null;
               return;
             }
 
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setProcesses(processes.map(p => {
-                    if (p.id === processId) {
-                        return type === 'photo' 
-                            ? { ...p, photos: [...(p.photos || []), reader.result] }
-                            : { ...p, videos: [...(p.videos || []), reader.result] };
-                    }
-                    return p;
-                }));
-            };
-            reader.readAsDataURL(file);
+            setToastMessage('⏳ 미디어 처리 중...');
+
+            let base64Data;
+            if (type === 'photo') {
+              // 사진은 첨부 즉시 크기를 줄여(압축) 용량을 1/10로 최적화합니다.
+              base64Data = await compressImage(file);
+            } else {
+              // 동영상은 그대로 Base64 변환
+              base64Data = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(file);
+              });
+            }
+
+            setProcesses(processes.map(p => {
+                if (p.id === processId) {
+                    return type === 'photo' 
+                        ? { ...p, photos: [...(p.photos || []), base64Data] }
+                        : { ...p, videos: [...(p.videos || []), base64Data] };
+                }
+                return p;
+            }));
+            
+            setToastMessage(''); // Toast 숨기기
             e.target.value = null;
           };
 
@@ -268,7 +332,7 @@
                 {toastMessage && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
-                      {isSyncing ? <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
+                      {isSyncing || toastMessage.includes('처리 중') ? <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
                       {toastMessage}
                     </div>
                   </div>
