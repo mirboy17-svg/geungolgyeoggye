@@ -1,0 +1,401 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Plus, 
+  Camera, 
+  Trash2, 
+  Save, 
+  ChevronLeft,
+  AlertCircle,
+  Image as ImageIcon,
+  CheckCircle2,
+  RefreshCw,
+  Cloud
+} from 'lucide-react';
+
+// 선택 옵션 정의 (새로 추가됨)
+const WORKLOAD_OPTIONS = [
+  { value: 1, label: '매우쉬움' },
+  { value: 2, label: '쉬움' },
+  { value: 3, label: '약간힘듦' },
+  { value: 4, label: '힘듦' },
+  { value: 5, label: '매우힘듦' }
+];
+
+const FREQUENCY_OPTIONS = [
+  { value: 1, label: '3개월마다(2~3회/년)' },
+  { value: 2, label: '가끔(하루또는1회/2~3일)' },
+  { value: 3, label: '자주(1일4시간)' },
+  { value: 4, label: '계속(1일4시간이상)' },
+  { value: 5, label: '초과근무시간(1일8시간 이상)' }
+];
+
+// 초기 빈 공정 데이터 양식
+const emptyProcess = () => ({
+  id: Date.now().toString(),
+  processName: '',
+  workContent: '',
+  workTime: '',
+  workInfo: '',
+  workload: 0,
+  frequency: 0,
+  photos: [null, null] // 기본 사진 슬롯 2개
+});
+
+export default function MobileApp() {
+  const [processes, setProcesses] = useState([emptyProcess()]);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState('');
+
+  // 🎯 연동할 구글 드라이브 폴더 ID (제공해주신 URL에서 추출)
+  const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
+
+  // 1. 앱 실행 시 로컬 스토리지(기기 내부)에서 데이터 불러오기
+  useEffect(() => {
+    const savedData = localStorage.getItem('localProcessData');
+    if (savedData) {
+      setProcesses(JSON.parse(savedData));
+    }
+  }, []);
+
+  // 토스트 메시지 자동 숨김 처리
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  // 💾 투트랙 저장 로직 (1차: 로컬, 2차: 구글 드라이브)
+  const saveToServer = (data, isAutoSave = false) => {
+    // 1차 저장: 스마트폰 기기 내부 (Local Storage / SQLite) - 즉시 저장됨
+    localStorage.setItem('localProcessData', JSON.stringify(data));
+    
+    if (isAutoSave) {
+      setToastMessage('📱 기기 내부에 자동 저장되었습니다.');
+    } else {
+      // 2차 저장: 구글 드라이브 (API 연동)
+      setIsSyncing(true);
+      setToastMessage('☁️ 지정된 구글 드라이브 폴더로 동기화 중입니다...');
+      
+      /* [실제 개발 시 구글 드라이브 API 파일 생성 로직 예시]
+        const metadata = {
+          name: `근골조사표_데이터_${new Date().toISOString().slice(0,10)}.json`,
+          mimeType: 'application/json',
+          parents: [TARGET_FOLDER_ID] // 👈 제공해주신 폴더 ID로 지정
+        };
+        // 이후 Google API fetch 요청 수행...
+      */
+      
+      // 가상의 클라우드 업로드 소요 시간 (2초)
+      setTimeout(() => {
+        setIsSyncing(false);
+        const now = new Date();
+        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        setLastSyncTime(timeString);
+        setToastMessage('✅ 구글 드라이브 지정 폴더에 저장 완료!');
+      }, 2000);
+    }
+  };
+
+  // 공정 추가 함수 (+ 자동 저장 기능 추가)
+  const addProcess = () => {
+    // 1. 신규 공정을 추가하기 전에 현재까지 작성된 데이터 자동 저장
+    saveToServer(processes, true);
+
+    // 2. 새 공정 양식 추가
+    setProcesses([...processes, emptyProcess()]);
+  };
+
+  // 수동 저장 버튼 클릭 시
+  const handleManualSave = () => {
+    saveToServer(processes, false);
+  };
+
+  // 공정 삭제 함수
+  const removeProcess = (id) => {
+    if (processes.length === 1) {
+      alert('최소 1개의 공정은 있어야 합니다.');
+      return;
+    }
+    setProcesses(processes.filter(p => p.id !== id));
+  };
+
+  // 공정 데이터 업데이트 함수
+  const updateProcess = (id, field, value) => {
+    setProcesses(processes.map(p => 
+      p.id === id ? { ...p, [field]: value } : p
+    ));
+  };
+
+  // 사진 슬롯 추가 함수
+  const addPhotoSlot = (id) => {
+    setProcesses(processes.map(p => 
+      p.id === id ? { ...p, photos: [...p.photos, null] } : p
+    ));
+  };
+
+  // 위험도 라벨 및 색상 계산
+  const getScoreInfo = (score) => {
+    if (score === 0) return { text: '평가 전', color: 'text-slate-400', bg: 'bg-slate-100' };
+    if (score >= 15) return { text: '고위험', color: 'text-red-600', bg: 'bg-red-50' };
+    if (score >= 10) return { text: '중위험', color: 'text-orange-600', bg: 'bg-orange-50' };
+    return { text: '저위험', color: 'text-green-600', bg: 'bg-green-50' };
+  };
+
+  return (
+    <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
+      {/* 모바일 화면 시뮬레이션 컨테이너 */}
+      <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
+        
+        {/* Toast 알림창 */}
+        {toastMessage && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
+            <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
+              {isSyncing ? (
+                <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
+              )}
+              {toastMessage}
+            </div>
+          </div>
+        )}
+
+        {/* App Header (Sticky) */}
+        <header className="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-md flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <ChevronLeft className="w-6 h-6" />
+            <div>
+              <h1 className="text-lg font-bold">현장 조사표 작성</h1>
+              {lastSyncTime && (
+                <div className="text-[10px] text-blue-200 flex items-center gap-1 mt-0.5">
+                  <Cloud className="w-3 h-3" /> 최근 동기화: {lastSyncTime}
+                </div>
+              )}
+            </div>
+          </div>
+          <button 
+            onClick={handleManualSave}
+            disabled={isSyncing}
+            className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
+              isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'
+            }`}
+          >
+            {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isSyncing ? '저장중' : '최종저장'}
+          </button>
+        </header>
+
+        {/* Scrollable Content */}
+        <main className="flex-1 overflow-y-auto p-4 pb-24 space-y-6 relative">
+          
+          <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-blue-100">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="mb-1">신규 공정 생성 시 기기 내부에 자동 저장되며, 데이터 손실을 방지합니다.</p>
+              <p className="text-xs text-blue-600 bg-blue-100/50 p-1.5 rounded border border-blue-200 mt-1">
+                🔗 연결된 드라이브 폴더 ID: <strong>{TARGET_FOLDER_ID.substring(0,12)}...</strong>
+              </p>
+            </div>
+          </div>
+
+          {processes.map((process, index) => {
+            const score = process.workload * process.frequency;
+            const scoreInfo = getScoreInfo(score);
+
+            return (
+              <div key={process.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* 공정 헤더 */}
+                <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">
+                      {index + 1}
+                    </span>
+                    <input 
+                      type="text" 
+                      placeholder="공정명 (예: 조립 1라인)" 
+                      className="bg-transparent border-none font-bold text-slate-800 focus:outline-none focus:ring-0 p-0 placeholder-slate-400 w-48"
+                      value={process.processName}
+                      onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
+                    />
+                  </div>
+                  <button 
+                    onClick={() => removeProcess(process.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-5">
+                  {/* 1. 작업내용 */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                      <span className="text-blue-500">1.</span> 작업내용
+                    </label>
+                    <textarea 
+                      rows="2"
+                      placeholder="주요 작업 내용을 입력하세요"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                      value={process.workContent}
+                      onChange={(e) => updateProcess(process.id, 'workContent', e.target.value)}
+                    />
+                  </div>
+
+                  {/* 2. 작업시간 */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                      <span className="text-blue-500">2.</span> 작업시간
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="예: 1일 4시간, 주 5일"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      value={process.workTime}
+                      onChange={(e) => updateProcess(process.id, 'workTime', e.target.value)}
+                    />
+                  </div>
+
+                  {/* 3. 작업정보 */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                      <span className="text-blue-500">3.</span> 작업정보
+                    </label>
+                    <textarea 
+                      rows="2"
+                      placeholder="취급 무게, 작업 자세 등 상세 정보"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                      value={process.workInfo}
+                      onChange={(e) => updateProcess(process.id, 'workInfo', e.target.value)}
+                    />
+                  </div>
+
+                  {/* 4. 작업부하 및 빈도 */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <span className="text-blue-500">4.</span> 작업부하 및 작업빈도
+                      </span>
+                    </label>
+
+                    {/* 부하/빈도 선택기 (좌우 배치 적용) */}
+                    <div className="flex gap-2 items-stretch">
+                      
+                      {/* 작업부하 (좌측, 45% 너비) */}
+                      <div className="w-[45%] flex flex-col">
+                        <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">
+                          작업부하 (A)
+                        </div>
+                        <div className="flex flex-col gap-1.5 flex-1">
+                          {WORKLOAD_OPTIONS.map(opt => (
+                            <button
+                              key={`wl-${opt.value}`}
+                              onClick={() => updateProcess(process.id, 'workload', opt.value)}
+                              className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border transition-colors ${
+                                process.workload === opt.value 
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-md font-bold' 
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'
+                              }`}
+                            >
+                              <span className="text-xs">{opt.label}</span>
+                              <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] ${process.workload === opt.value ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{opt.value}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 작업빈도 (우측, 55% 너비) */}
+                      <div className="w-[55%] flex flex-col">
+                        <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">
+                          작업빈도 (B)
+                        </div>
+                        <div className="flex flex-col gap-1.5 flex-1">
+                          {FREQUENCY_OPTIONS.map(opt => (
+                            <button
+                              key={`fq-${opt.value}`}
+                              onClick={() => updateProcess(process.id, 'frequency', opt.value)}
+                              className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border text-left transition-colors ${
+                                process.frequency === opt.value 
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-bold' 
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'
+                              }`}
+                            >
+                              <span className="text-[10px] leading-tight pr-1 flex-1 break-keep">{opt.label}</span>
+                              <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] ${process.frequency === opt.value ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{opt.value}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                    </div>
+
+                    {/* 결과 점수판 */}
+                    <div className={`mt-4 p-4 rounded-xl border ${scoreInfo.bg} ${scoreInfo.color.replace('text-', 'border-').replace('600', '200')}`}>
+                      <div className="text-[11px] font-bold text-slate-600 mb-2 border-b border-black/5 pb-2">
+                        작업부하(A) × 작업빈도(B) = 작업부하빈도
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-end gap-2">
+                          <span className="text-3xl font-black leading-none">{score}</span>
+                          <span className="text-sm font-medium opacity-70 mb-0.5">
+                            ({process.workload || '?'} × {process.frequency || '?'})
+                          </span>
+                        </div>
+                        <span className={`text-sm font-bold px-3 py-1.5 rounded-lg bg-white/60 shadow-sm ${scoreInfo.color}`}>
+                          {scoreInfo.text}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5. 사진 첨부 */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
+                        <span className="text-blue-500">5.</span> 현장 사진 첨부
+                      </label>
+                      <span className="text-xs text-slate-400 font-medium">
+                        총 {process.photos.length}장 첨부 가능
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      {process.photos.map((_, pIdx) => (
+                        <div key={pIdx} className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative overflow-hidden group">
+                          <Camera className="w-8 h-8 mb-2" />
+                          <span className="text-xs font-medium">사진 촬영/선택</span>
+                          {/* 가상의 앱 동작: 터치 효과 */}
+                          <div className="absolute inset-0 bg-black/5 opacity-0 group-active:opacity-100 transition-opacity"></div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 사진 추가 버튼 */}
+                    <button 
+                      onClick={() => addPhotoSlot(process.id)}
+                      className="w-full mt-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-600 flex items-center justify-center gap-2 hover:bg-slate-50 active:bg-slate-100"
+                    >
+                      <ImageIcon className="w-4 h-4" /> 사진 추가 (현재 {process.photos.length}장)
+                    </button>
+                  </div>
+                  
+                </div>
+              </div>
+            );
+          })}
+        </main>
+
+        {/* 하단 고정 FAB (신규 공정 생성 버튼) */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent pt-12">
+          <button 
+            onClick={addProcess}
+            className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-lg shadow-lg shadow-slate-800/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+          >
+            <Plus className="w-6 h-6" /> 신규 공정 생성 (자동 저장)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
