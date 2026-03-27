@@ -78,8 +78,23 @@
           const GAS_WEB_APP_URL = '여기에_복사한_웹앱_URL을_붙여넣으세요'; 
 
           useEffect(() => {
-            const savedData = localStorage.getItem('localProcessData');
-            if (savedData) setProcesses(JSON.parse(savedData));
+            try {
+              const savedData = localStorage.getItem('localProcessData');
+              if (savedData) {
+                const parsedData = JSON.parse(savedData);
+                // 💡 화면 멈춤 방지용 안전 장치: 과거 저장된 데이터에 photos/videos 항목이 없어도 튕기지 않도록 기본값(배열) 강제 적용
+                const safeData = parsedData.map(p => ({
+                  ...emptyProcess(), // 기본 양식을 먼저 깔고
+                  ...p,              // 과거 데이터를 덮어씌운 뒤
+                  photos: Array.isArray(p.photos) ? p.photos.filter(photo => photo !== null) : [], // 예전 버전의 null 사진 제거
+                  videos: Array.isArray(p.videos) ? p.videos : [] // 동영상 항목이 아예 없었을 경우 빈 배열로 세팅
+                }));
+                setProcesses(safeData);
+              }
+            } catch (error) {
+              console.error("데이터 복구 실패, 초기화합니다.", error);
+              localStorage.removeItem('localProcessData'); // 데이터가 완전히 망가졌을 경우 초기화
+            }
           }, []);
 
           useEffect(() => {
@@ -115,11 +130,11 @@
                         "작업빈도(B)": p.frequency,
                         "총점": p.workload * p.frequency
                       },
-                      photos: p.photos.map((base64, i) => ({
+                      photos: (p.photos || []).map((base64, i) => ({
                         fileName: `${processName}_사진_${i + 1}.jpg`,
                         data: base64
                       })),
-                      videos: p.videos.map((base64, i) => ({
+                      videos: (p.videos || []).map((base64, i) => ({
                         fileName: `${processName}_동영상_${i + 1}.mp4`,
                         data: base64
                       }))
@@ -169,6 +184,14 @@
 
           const handleManualSave = () => saveToServer(processes, false);
 
+          const handleReset = () => {
+            if(confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
+              localStorage.removeItem('localProcessData');
+              setProcesses([emptyProcess()]);
+              setToastMessage('🗑️ 데이터가 초기화되었습니다.');
+            }
+          };
+
           const removeProcess = (id) => {
             if (processes.length === 1) return alert('최소 1개의 공정은 있어야 합니다.');
             setProcesses(processes.filter(p => p.id !== id));
@@ -186,8 +209,8 @@
                 setProcesses(processes.map(p => {
                     if (p.id === processId) {
                         return type === 'photo' 
-                            ? { ...p, photos: [...p.photos, reader.result] }
-                            : { ...p, videos: [...p.videos, reader.result] };
+                            ? { ...p, photos: [...(p.photos || []), reader.result] }
+                            : { ...p, videos: [...(p.videos || []), reader.result] };
                     }
                     return p;
                 }));
@@ -200,7 +223,7 @@
             if(confirm(`이 ${type === 'photo' ? '사진' : '동영상'}을 삭제하시겠습니까?`)) {
               setProcesses(processes.map(p => {
                   if (p.id === processId) {
-                      const newList = [...p[type === 'photo' ? 'photos' : 'videos']];
+                      const newList = [...(p[type === 'photo' ? 'photos' : 'videos'] || [])];
                       newList.splice(index, 1);
                       return type === 'photo' ? { ...p, photos: newList } : { ...p, videos: newList };
                   }
@@ -243,14 +266,23 @@
                       )}
                     </div>
                   </div>
-                  <button 
-                    onClick={handleManualSave}
-                    disabled={isSyncing}
-                    className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
-                  >
-                    {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {isSyncing ? '저장중' : '최종저장'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={handleReset}
+                      disabled={isSyncing}
+                      className="flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors bg-blue-500 hover:bg-blue-400 active:scale-95"
+                    >
+                      <RefreshCw className="w-4 h-4" /> 초기화
+                    </button>
+                    <button 
+                      onClick={handleManualSave}
+                      disabled={isSyncing}
+                      className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
+                    >
+                      {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {isSyncing ? '저장중' : '최종저장'}
+                    </button>
+                  </div>
                 </header>
 
                 {/* Main Content */}
@@ -265,6 +297,10 @@
                   {processes.map((process, index) => {
                     const score = process.workload * process.frequency;
                     const scoreInfo = getScoreInfo(score);
+                    
+                    // 안전 장치: photos/videos가 undefined일 경우 빈 배열로 처리
+                    const safePhotos = process.photos || [];
+                    const safeVideos = process.videos || [];
 
                     return (
                       <div key={process.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -359,16 +395,16 @@
                           <div>
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">5.</span> 현장 사진 첨부</label>
-                              <span className="text-xs text-slate-400 font-medium">{process.photos.length}장 / 최대 10장</span>
+                              <span className="text-xs text-slate-400 font-medium">{safePhotos.length}장 / 최대 10장</span>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
-                              {process.photos.map((photoStr, pIdx) => (
+                              {safePhotos.map((photoStr, pIdx) => (
                                 <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
                                   <img src={photoStr} className="w-full h-full object-cover" />
                                   <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               ))}
-                              {process.photos.length < 10 && (
+                              {safePhotos.length < 10 && (
                                 <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
                                   <Camera className="w-8 h-8 mb-2" />
                                   <span className="text-xs font-medium">사진 촬영 (터치)</span>
@@ -382,16 +418,16 @@
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
-                              <span className="text-xs text-slate-400 font-medium">{process.videos.length}개 / 최대 4개</span>
+                              <span className="text-xs text-slate-400 font-medium">{safeVideos.length}개 / 최대 4개</span>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
-                              {process.videos.map((videoStr, vIdx) => (
+                              {safeVideos.map((videoStr, vIdx) => (
                                 <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
                                   <video src={videoStr} controls className="w-full h-full object-cover"></video>
                                   <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-10"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               ))}
-                              {process.videos.length < 4 && (
+                              {safeVideos.length < 4 && (
                                 <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
                                   <VideoIcon className="w-8 h-8 mb-2" />
                                   <span className="text-xs font-medium">동영상 촬영 (터치)</span>
