@@ -55,7 +55,7 @@
 
         // 초기 빈 공정 양식
         const emptyProcess = () => ({
-          id: Date.now().toString(),
+          id: 'proc_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
           processName: '',
           workContent: '',
           workTime: '',
@@ -66,7 +66,7 @@
           videos: []
         });
 
-        // 💡 이미지 최적화(압축) 함수: 5MB 사진을 100~200KB로 획기적으로 줄여줍니다.
+        // 💡 사진 초고효율 압축 함수 (480p 해상도 수준으로 강제 변환)
         const compressImage = (file) => {
           return new Promise((resolve) => {
             const reader = new FileReader();
@@ -76,8 +76,9 @@
               img.src = event.target.result;
               img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 1280;
-                const MAX_HEIGHT = 1280;
+                // 해상도를 480p (가로 또는 세로 최대 854픽셀) 수준으로 대폭 낮춤
+                const MAX_WIDTH = 854; 
+                const MAX_HEIGHT = 854;
                 let width = img.width;
                 let height = img.height;
 
@@ -96,8 +97,8 @@
                 canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                // 품질 0.6으로 압축하여 Base64 반환
-                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                // 화질(Quality)도 0.5(50%)로 깎아서 용량을 극한으로 줄임
+                resolve(canvas.toDataURL('image/jpeg', 0.5));
               };
             };
           });
@@ -139,7 +140,7 @@
             }
           }, [toastMessage, isSyncing]);
 
-          // 🚀 분할 전송 시스템 (용량 초과 및 서버 타임아웃 완벽 해결)
+          // 🚀 분할 전송 시스템
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             if (isAutoSave) {
@@ -155,11 +156,12 @@
             setIsSyncing(true);
             
             try {
-              // 1. 대기열(Queue) 생성: 텍스트 덩어리와 미디어 파일들을 분리
               const mediaQueue = [];
               const nowForName = new Date();
               const timeStr = `${nowForName.getHours()}${nowForName.getMinutes()}${nowForName.getSeconds()}`;
               const processNamesStr = data.map((p, index) => p.processName || `미지정공정${index + 1}`).join(', ');
+
+              const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
 
               const spreadsheetPayload = {
                 type: 'spreadsheet',
@@ -168,7 +170,6 @@
                 processes: data.map((p, index) => {
                   const processName = p.processName || `미지정_공정_${index + 1}`;
                   
-                  // 미디어 파일들은 별도의 배열에 순서대로 담아둡니다.
                   (p.photos || []).forEach((base64, i) => {
                     mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: base64 });
                   });
@@ -191,41 +192,44 @@
                 })
               };
 
-              // 2. 가벼운 텍스트(스프레드시트) 데이터를 먼저 전송 (1초 내 완료)
               setToastMessage('☁️ 스프레드시트 데이터 전송 중...');
-              let response = await fetch(GAS_WEB_APP_URL, {
+              let response = await fetch(fetchUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 
+                  'Content-Type': 'text/plain;charset=utf-8',
+                  'Cache-Control': 'no-cache, no-store, must-revalidate'
+                },
                 body: JSON.stringify(spreadsheetPayload)
               });
               let result = await response.json();
               if (result.status !== "success") throw new Error(result.message);
 
-              // 3. 미디어 파일들을 하나씩 순서대로 전송 (용량 초과 원천 차단)
               const totalMedia = mediaQueue.length;
               for (let i = 0; i < totalMedia; i++) {
                 const mediaItem = mediaQueue[i];
                 const isVideo = mediaItem.fileName.includes('동영상');
                 setToastMessage(`☁️ 첨부 파일 업로드 중... (${i + 1}/${totalMedia}) - ${isVideo ? '동영상' : '사진'}`);
                 
-                response = await fetch(GAS_WEB_APP_URL, {
+                response = await fetch(fetchUrl, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  headers: { 
+                    'Content-Type': 'text/plain;charset=utf-8',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                  },
                   body: JSON.stringify(mediaItem)
                 });
                 result = await response.json();
                 if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
               }
               
-              // 4. 모든 업로드 완료 처리
               const now = new Date();
               setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
               
               setTimeout(() => {
-                if(confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
+                if(window.confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
                   localStorage.removeItem('localProcessData');
                   setProcesses([emptyProcess()]);
-                  setToastMessage('✨ 새로운 조사를 시작합니다.');
+                  setToastMessage('✨ 화면이 초기화되었습니다. 새 조사를 시작하세요.');
                 } else {
                   setToastMessage('✅ 모든 데이터 및 파일 전송 완료!');
                 }
@@ -248,10 +252,10 @@
           const handleManualSave = () => saveToServer(processes, false);
 
           const handleReset = () => {
-            if(confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
+            if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
               setProcesses([emptyProcess()]);
-              setToastMessage('🗑️ 데이터가 초기화되었습니다.');
+              setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
             }
           };
 
@@ -264,14 +268,19 @@
             setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
+          // 동영상 버튼 클릭 시 경고 알림창
+          const handleVideoClick = () => {
+            alert("🚨 [동영상 촬영 주의사항]\n\n동영상 용량이 크면 서버 저장이 실패합니다.\n\n✔️ 10초 이내로 핵심 작업만 짧게 촬영해 주세요.\n✔️ 가능하면 휴대폰 카메라 설정에서 화질을 'VGA(480p)'나 'HD(720p)'로 낮춰주세요.");
+          };
+
           const handleMediaCapture = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            // 안드로이드/아이폰 메모리 보호용 제한
-            const maxSizeMB = type === 'photo' ? 10 : 50; 
+            // 엄격한 용량 제한
+            const maxSizeMB = type === 'photo' ? 10 : 15; 
             if (file.size > maxSizeMB * 1024 * 1024) {
-              alert(`⚠️ 파일 용량이 너무 큽니다!\n${type === 'photo' ? '사진은 10MB' : '동영상은 50MB'} 이하만 첨부 가능합니다.`);
+              alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n\n${type === 'photo' ? '사진은 10MB' : '동영상은 15MB'} 이하만 첨부 가능합니다.\n\n해결방법: 카메라 설정에서 화질을 낮추거나 더 짧게 촬영하세요.`);
               e.target.value = null;
               return;
             }
@@ -492,14 +501,14 @@
                               {safePhotos.length < 10 && (
                                 <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
                                   <Camera className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-medium">사진 촬영 (터치)</span>
+                                  <span className="text-xs font-medium text-center">사진 촬영<br/>(자동 압축됨)</span>
                                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'photo')} />
                                 </label>
                               )}
                             </div>
                           </div>
 
-                          {/* 6. 동영상 첨부 */}
+                          {/* 6. 동영상 첨부 (경고창 추가) */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
@@ -513,9 +522,12 @@
                                 </div>
                               ))}
                               {safeVideos.length < 4 && (
-                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
-                                  <VideoIcon className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-medium">동영상 촬영 (터치)</span>
+                                <label 
+                                  onClick={handleVideoClick}
+                                  className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                  <VideoIcon className="w-8 h-8 mb-1" />
+                                  <span className="text-xs font-bold text-slate-600">동영상 촬영</span>
+                                  <span className="text-[10px] text-red-500 mt-1 font-bold">※ 짧게, 화질 낮춰서</span>
                                   <input type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'video')} />
                                 </label>
                               )}
