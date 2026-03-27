@@ -8,38 +8,35 @@
     <!-- Tailwind CSS (스타일링) -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- React & ReactDOM (핵심 라이브러리) -->
+    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     
-    <!-- Babel (브라우저에서 JSX 문법을 해석하기 위해 필요) -->
+    <!-- Babel (브라우저용 JSX 컴파일러) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-200">
-    <!-- 앱이 렌더링될 영역 -->
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- 아이콘 컴포넌트 정의 (lucide-react 대체용) ---
+        // --- 아이콘 컴포넌트 ---
         const Icon = ({ path, className }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-6 h-6"}>
-                {path}
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-6 h-6"}>{path}</svg>
         );
         const ChevronLeft = ({className}) => <Icon className={className} path={<path d="m15 18-6-6 6-6"/>} />;
         const Save = ({className}) => <Icon className={className} path={<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>} />;
         const AlertCircle = ({className}) => <Icon className={className} path={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
         const Trash2 = ({className}) => <Icon className={className} path={<><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>} />;
         const Camera = ({className}) => <Icon className={className} path={<><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>} />;
-        const ImageIcon = ({className}) => <Icon className={className} path={<><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>} />;
+        const VideoIcon = ({className}) => <Icon className={className} path={<><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></>} />;
         const Plus = ({className}) => <Icon className={className} path={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>} />;
         const CheckCircle2 = ({className}) => <Icon className={className} path={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>} />;
         const RefreshCw = ({className}) => <Icon className={className} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Cloud = ({className}) => <Icon className={className} path={<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>} />;
 
-        // --- 선택 옵션 정의 ---
+        // --- 선택 옵션 ---
         const WORKLOAD_OPTIONS = [
           { value: 1, label: '매우쉬움' },
           { value: 2, label: '쉬움' },
@@ -56,7 +53,7 @@
           { value: 5, label: '초과근무시간(1일8시간 이상)' }
         ];
 
-        // 초기 빈 공정 데이터 양식
+        // 초기 양식
         const emptyProcess = () => ({
           id: Date.now().toString(),
           processName: '',
@@ -65,10 +62,11 @@
           workInfo: '',
           workload: 0,
           frequency: 0,
-          photos: [null, null] // 기본 사진 슬롯 2개
+          photos: [],
+          videos: []
         });
 
-        // --- 메인 앱 컴포넌트 ---
+        // --- 메인 앱 ---
         function MobileApp() {
           const [processes, setProcesses] = useState([emptyProcess()]);
           const [toastMessage, setToastMessage] = useState('');
@@ -76,12 +74,12 @@
           const [lastSyncTime, setLastSyncTime] = useState('');
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
+          // 🚀 구글 앱스 스크립트 웹앱 URL (발급받은 URL 입력)
+          const GAS_WEB_APP_URL = '여기에_복사한_웹앱_URL을_붙여넣으세요'; 
 
           useEffect(() => {
             const savedData = localStorage.getItem('localProcessData');
-            if (savedData) {
-              setProcesses(JSON.parse(savedData));
-            }
+            if (savedData) setProcesses(JSON.parse(savedData));
           }, []);
 
           useEffect(() => {
@@ -91,22 +89,76 @@
             }
           }, [toastMessage]);
 
-          const saveToServer = (data, isAutoSave = false) => {
+          const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             
             if (isAutoSave) {
-              setToastMessage('📱 기기 내부에 자동 저장되었습니다.');
+              setToastMessage('📱 기기 내부 임시 저장 완료');
             } else {
               setIsSyncing(true);
-              setToastMessage('☁️ 지정된 구글 드라이브 폴더로 동기화 중입니다...');
+              setToastMessage('☁️ 구글 스프레드시트 및 드라이브에 업로드 중입니다...');
               
-              setTimeout(() => {
+              try {
+                const payload = {
+                  folderId: TARGET_FOLDER_ID,
+                  spreadsheetName: `근골조사표_종합_${new Date().toISOString().slice(0,10)}`,
+                  processes: data.map((p, index) => {
+                    const processName = p.processName || `미지정_공정_${index + 1}`;
+                    return {
+                      sheetName: processName,
+                      info: {
+                        "공정명": processName,
+                        "작업내용": p.workContent,
+                        "작업시간": p.workTime,
+                        "작업정보": p.workInfo,
+                        "작업부하(A)": p.workload,
+                        "작업빈도(B)": p.frequency,
+                        "총점": p.workload * p.frequency
+                      },
+                      photos: p.photos.map((base64, i) => ({
+                        fileName: `${processName}_사진_${i + 1}.jpg`,
+                        data: base64
+                      })),
+                      videos: p.videos.map((base64, i) => ({
+                        fileName: `${processName}_동영상_${i + 1}.mp4`,
+                        data: base64
+                      }))
+                    };
+                  })
+                };
+
+                if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
+                  // 개발 시뮬레이션용 딜레이
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  const now = new Date();
+                  setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
+                  setToastMessage('✅ 구글 드라이브 동기화 시뮬레이션 완료! (실제 API URL 필요)');
+                  setIsSyncing(false);
+                  return;
+                }
+
+                const response = await fetch(GAS_WEB_APP_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === "success") {
+                  const now = new Date();
+                  setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
+                  setToastMessage('✅ 스프레드시트 생성 및 미디어 저장 완료!');
+                } else {
+                  throw new Error(result.message);
+                }
+
+              } catch (error) {
+                console.error("업로드 실패:", error);
+                setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
+              } finally {
                 setIsSyncing(false);
-                const now = new Date();
-                const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                setLastSyncTime(timeString);
-                setToastMessage('✅ 구글 드라이브 지정 폴더에 저장 완료!');
-              }, 2000);
+              }
             }
           };
 
@@ -115,28 +167,46 @@
             setProcesses([...processes, emptyProcess()]);
           };
 
-          const handleManualSave = () => {
-            saveToServer(processes, false);
-          };
+          const handleManualSave = () => saveToServer(processes, false);
 
           const removeProcess = (id) => {
-            if (processes.length === 1) {
-              alert('최소 1개의 공정은 있어야 합니다.');
-              return;
-            }
+            if (processes.length === 1) return alert('최소 1개의 공정은 있어야 합니다.');
             setProcesses(processes.filter(p => p.id !== id));
           };
 
           const updateProcess = (id, field, value) => {
-            setProcesses(processes.map(p => 
-              p.id === id ? { ...p, [field]: value } : p
-            ));
+            setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
-          const addPhotoSlot = (id) => {
-            setProcesses(processes.map(p => 
-              p.id === id ? { ...p, photos: [...p.photos, null] } : p
-            ));
+          const handleMediaCapture = (e, processId, type) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setProcesses(processes.map(p => {
+                    if (p.id === processId) {
+                        return type === 'photo' 
+                            ? { ...p, photos: [...p.photos, reader.result] }
+                            : { ...p, videos: [...p.videos, reader.result] };
+                    }
+                    return p;
+                }));
+            };
+            reader.readAsDataURL(file);
+            e.target.value = null;
+          };
+
+          const removeMedia = (processId, index, type) => {
+            if(confirm(`이 ${type === 'photo' ? '사진' : '동영상'}을 삭제하시겠습니까?`)) {
+              setProcesses(processes.map(p => {
+                  if (p.id === processId) {
+                      const newList = [...p[type === 'photo' ? 'photos' : 'videos']];
+                      newList.splice(index, 1);
+                      return type === 'photo' ? { ...p, photos: newList } : { ...p, videos: newList };
+                  }
+                  return p;
+              }));
+            }
           };
 
           const getScoreInfo = (score) => {
@@ -154,17 +224,13 @@
                 {toastMessage && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
-                      {isSyncing ? (
-                        <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
-                      )}
+                      {isSyncing ? <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
                       {toastMessage}
                     </div>
                   </div>
                 )}
 
-                {/* App Header (Sticky) */}
+                {/* App Header */}
                 <header className="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-md flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <ChevronLeft className="w-6 h-6" />
@@ -180,25 +246,19 @@
                   <button 
                     onClick={handleManualSave}
                     disabled={isSyncing}
-                    className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
-                      isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'
-                    }`}
+                    className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
                   >
                     {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     {isSyncing ? '저장중' : '최종저장'}
                   </button>
                 </header>
 
-                {/* Scrollable Content */}
-                <main className="flex-1 overflow-y-auto p-4 pb-24 space-y-6 relative">
-                  
+                {/* Main Content */}
+                <main className="flex-1 overflow-y-auto p-4 pb-24 space-y-6">
                   <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-blue-100">
                     <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                     <div className="flex-1">
-                      <p className="mb-1">신규 공정 생성 시 기기 내부에 자동 저장되며, 데이터 손실을 방지합니다.</p>
-                      <p className="text-xs text-blue-600 bg-blue-100/50 p-1.5 rounded border border-blue-200 mt-1">
-                        🔗 연결된 드라이브 폴더 ID: <strong>{TARGET_FOLDER_ID.substring(0,12)}...</strong>
-                      </p>
+                      <p className="mb-1">작성하신 데이터와 사진/동영상은 <strong>구글 스프레드시트 및 드라이브</strong>에 자동 동기화됩니다.</p>
                     </div>
                   </div>
 
@@ -211,9 +271,7 @@
                         {/* 공정 헤더 */}
                         <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                           <div className="flex items-center gap-2">
-                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">
-                              {index + 1}
-                            </span>
+                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">{index + 1}</span>
                             <input 
                               type="text" 
                               placeholder="공정명 (예: 조립 1라인)" 
@@ -222,105 +280,61 @@
                               onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
                             />
                           </div>
-                          <button 
-                            onClick={() => removeProcess(process.id)}
-                            className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                          <button onClick={() => removeProcess(process.id)} className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"><Trash2 className="w-5 h-5" /></button>
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 작업내용 */}
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                              <span className="text-blue-500">1.</span> 작업내용
-                            </label>
-                            <textarea 
-                              rows="2"
-                              placeholder="주요 작업 내용을 입력하세요"
-                              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-                              value={process.workContent}
-                              onChange={(e) => updateProcess(process.id, 'workContent', e.target.value)}
-                            />
-                          </div>
-
-                          {/* 2. 작업시간 */}
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                              <span className="text-blue-500">2.</span> 작업시간
-                            </label>
-                            <input 
-                              type="text" 
-                              placeholder="예: 1일 4시간, 주 5일"
-                              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                              value={process.workTime}
-                              onChange={(e) => updateProcess(process.id, 'workTime', e.target.value)}
-                            />
-                          </div>
-
-                          {/* 3. 작업정보 */}
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                              <span className="text-blue-500">3.</span> 작업정보
-                            </label>
-                            <textarea 
-                              rows="2"
-                              placeholder="취급 무게, 작업 자세 등 상세 정보"
-                              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-                              value={process.workInfo}
-                              onChange={(e) => updateProcess(process.id, 'workInfo', e.target.value)}
-                            />
-                          </div>
+                          {/* 1~3번 항목 */}
+                          {['workContent', 'workTime', 'workInfo'].map((field, idx) => {
+                            const labels = ['작업내용', '작업시간', '작업정보'];
+                            const placeholders = ['주요 작업 내용을 입력하세요', '예: 1일 4시간, 주 5일', '취급 무게, 작업 자세 등 상세 정보'];
+                            return (
+                              <div key={field}>
+                                <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                                  <span className="text-blue-500">{idx + 1}.</span> {labels[idx]}
+                                </label>
+                                {field === 'workTime' ? (
+                                  <input 
+                                    type="text" placeholder={placeholders[idx]} 
+                                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    value={process[field]} onChange={(e) => updateProcess(process.id, field, e.target.value)}
+                                  />
+                                ) : (
+                                  <textarea 
+                                    rows="2" placeholder={placeholders[idx]}
+                                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                                    value={process[field]} onChange={(e) => updateProcess(process.id, field, e.target.value)}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
 
                           {/* 4. 작업부하 및 빈도 */}
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                            <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center justify-between">
-                              <span className="flex items-center gap-1">
-                                <span className="text-blue-500">4.</span> 작업부하 및 작업빈도
-                              </span>
+                            <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center">
+                              <span className="text-blue-500 mr-1">4.</span> 작업부하 및 작업빈도
                             </label>
 
                             <div className="flex gap-2 items-stretch">
-                              {/* 작업부하 */}
                               <div className="w-[45%] flex flex-col">
-                                <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">
-                                  작업부하 (A)
-                                </div>
+                                <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">작업부하 (A)</div>
                                 <div className="flex flex-col gap-1.5 flex-1">
                                   {WORKLOAD_OPTIONS.map(opt => (
-                                    <button
-                                      key={`wl-${opt.value}`}
-                                      onClick={() => updateProcess(process.id, 'workload', opt.value)}
-                                      className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border transition-colors ${
-                                        process.workload === opt.value 
-                                          ? 'bg-blue-600 text-white border-blue-600 shadow-md font-bold' 
-                                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'
-                                      }`}
-                                    >
+                                    <button key={`wl-${opt.value}`} onClick={() => updateProcess(process.id, 'workload', opt.value)}
+                                      className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border transition-colors ${process.workload === opt.value ? 'bg-blue-600 text-white border-blue-600 shadow-md font-bold' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'}`}>
                                       <span className="text-xs">{opt.label}</span>
                                       <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] ${process.workload === opt.value ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{opt.value}</span>
                                     </button>
                                   ))}
                                 </div>
                               </div>
-
-                              {/* 작업빈도 */}
                               <div className="w-[55%] flex flex-col">
-                                <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">
-                                  작업빈도 (B)
-                                </div>
+                                <div className="text-xs font-bold text-slate-700 mb-2 text-center bg-slate-200/70 py-1.5 rounded-lg">작업빈도 (B)</div>
                                 <div className="flex flex-col gap-1.5 flex-1">
                                   {FREQUENCY_OPTIONS.map(opt => (
-                                    <button
-                                      key={`fq-${opt.value}`}
-                                      onClick={() => updateProcess(process.id, 'frequency', opt.value)}
-                                      className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border text-left transition-colors ${
-                                        process.frequency === opt.value 
-                                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-bold' 
-                                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'
-                                      }`}
-                                    >
+                                    <button key={`fq-${opt.value}`} onClick={() => updateProcess(process.id, 'frequency', opt.value)}
+                                      className={`w-full flex-1 flex items-center justify-between p-2 rounded-lg border text-left transition-colors ${process.frequency === opt.value ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-bold' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 font-medium'}`}>
                                       <span className="text-[10px] leading-tight pr-1 flex-1 break-keep">{opt.label}</span>
                                       <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] ${process.frequency === opt.value ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{opt.value}</span>
                                     </button>
@@ -329,21 +343,14 @@
                               </div>
                             </div>
 
-                            {/* 결과 점수판 */}
                             <div className={`mt-4 p-4 rounded-xl border ${scoreInfo.bg} ${scoreInfo.color.replace('text-', 'border-').replace('600', '200')}`}>
-                              <div className="text-[11px] font-bold text-slate-600 mb-2 border-b border-black/5 pb-2">
-                                작업부하(A) × 작업빈도(B) = 작업부하빈도
-                              </div>
+                              <div className="text-[11px] font-bold text-slate-600 mb-2 border-b border-black/5 pb-2">작업부하(A) × 작업빈도(B) = 작업부하빈도</div>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-end gap-2">
                                   <span className="text-3xl font-black leading-none">{score}</span>
-                                  <span className="text-sm font-medium opacity-70 mb-0.5">
-                                    ({process.workload || '?'} × {process.frequency || '?'})
-                                  </span>
+                                  <span className="text-sm font-medium opacity-70 mb-0.5">({process.workload || '?'} × {process.frequency || '?'})</span>
                                 </div>
-                                <span className={`text-sm font-bold px-3 py-1.5 rounded-lg bg-white/60 shadow-sm ${scoreInfo.color}`}>
-                                  {scoreInfo.text}
-                                </span>
+                                <span className={`text-sm font-bold px-3 py-1.5 rounded-lg bg-white/60 shadow-sm ${scoreInfo.color}`}>{scoreInfo.text}</span>
                               </div>
                             </div>
                           </div>
@@ -351,30 +358,47 @@
                           {/* 5. 사진 첨부 */}
                           <div>
                             <div className="flex items-center justify-between mb-2">
-                              <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                <span className="text-blue-500">5.</span> 현장 사진 첨부
-                              </label>
-                              <span className="text-xs text-slate-400 font-medium">
-                                총 {process.photos.length}장 첨부 가능
-                              </span>
+                              <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">5.</span> 현장 사진 첨부</label>
+                              <span className="text-xs text-slate-400 font-medium">{process.photos.length}장 / 최대 10장</span>
                             </div>
-                            
                             <div className="grid grid-cols-2 gap-3">
-                              {process.photos.map((_, pIdx) => (
-                                <div key={pIdx} className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative overflow-hidden group">
-                                  <Camera className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-medium">사진 촬영/선택</span>
-                                  <div className="absolute inset-0 bg-black/5 opacity-0 group-active:opacity-100 transition-opacity"></div>
+                              {process.photos.map((photoStr, pIdx) => (
+                                <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                                  <img src={photoStr} className="w-full h-full object-cover" />
+                                  <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               ))}
+                              {process.photos.length < 10 && (
+                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                  <Camera className="w-8 h-8 mb-2" />
+                                  <span className="text-xs font-medium">사진 촬영 (터치)</span>
+                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'photo')} />
+                                </label>
+                              )}
                             </div>
+                          </div>
 
-                            <button 
-                              onClick={() => addPhotoSlot(process.id)}
-                              className="w-full mt-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-600 flex items-center justify-center gap-2 hover:bg-slate-50 active:bg-slate-100"
-                            >
-                              <ImageIcon className="w-4 h-4" /> 사진 추가 (현재 {process.photos.length}장)
-                            </button>
+                          {/* 6. 동영상 첨부 */}
+                          <div className="pt-2 border-t border-slate-100">
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
+                              <span className="text-xs text-slate-400 font-medium">{process.videos.length}개 / 최대 4개</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              {process.videos.map((videoStr, vIdx) => (
+                                <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
+                                  <video src={videoStr} controls className="w-full h-full object-cover"></video>
+                                  <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-10"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              ))}
+                              {process.videos.length < 4 && (
+                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                  <VideoIcon className="w-8 h-8 mb-2" />
+                                  <span className="text-xs font-medium">동영상 촬영 (터치)</span>
+                                  <input type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'video')} />
+                                </label>
+                              )}
+                            </div>
                           </div>
                           
                         </div>
@@ -383,13 +407,10 @@
                   })}
                 </main>
 
-                {/* 하단 고정 FAB (신규 공정 생성 버튼) */}
+                {/* 하단 고정 FAB */}
                 <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent pt-12">
-                  <button 
-                    onClick={addProcess}
-                    className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-lg shadow-lg shadow-slate-800/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-                  >
-                    <Plus className="w-6 h-6" /> 신규 공정 생성 (자동 저장)
+                  <button onClick={addProcess} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-lg shadow-lg shadow-slate-800/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+                    <Plus className="w-6 h-6" /> 신규 공정 생성 (기기 임시저장)
                   </button>
                 </div>
               </div>
@@ -397,7 +418,6 @@
           );
         }
 
-        // 앱 렌더링
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<MobileApp />);
     </script>
