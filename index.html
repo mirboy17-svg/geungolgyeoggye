@@ -302,11 +302,6 @@
             setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
-          // 동영상 안내창 (기술적 제약사항 및 안내 추가)
-          const handleVideoClick = () => {
-            alert("🚨 [동영상 촬영 안내]\n\n웹 브라우저 정책상 특정 앱(오픈 카메라)이나 해상도(256x144)를 강제 지정할 수 없습니다.\n\n✔️ 안드로이드의 경우 앱 선택 창이 뜨면 '오픈 카메라'를 선택해 주세요.\n✔️ 기본 카메라를 쓸 경우 반드시 설정에서 화질을 가장 낮게(VGA 등) 낮추고 15초 이내로 촬영하세요.");
-          };
-
           const handleMediaCapture = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -651,13 +646,10 @@
                                 </div>
                               ))}
                               {safeVideos.length < 4 && (
-                                <label 
-                                  onClick={handleVideoClick}
-                                  className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
                                   <VideoIcon className="w-8 h-8 mb-1" />
                                   <span className="text-xs font-bold text-slate-600">동영상 촬영</span>
                                   <span className="text-[10px] text-red-500 mt-1 font-bold">※ 최대 30MB</span>
-                                  {/* capture="environment" 속성을 제거하여 앱 선택 창이 뜨도록 유도합니다 */}
                                   <input type="file" accept="video/*" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'video')} />
                                 </label>
                               )}
