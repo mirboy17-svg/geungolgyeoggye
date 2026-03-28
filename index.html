@@ -154,6 +154,7 @@
           const recognitionRef = useRef(null);
           const transcriptRef = useRef('');
           const manualStopRef = useRef(false); // 🔥 수동 종료 여부를 추적하기 위한 Ref
+          const recordingTimerRef = useRef(null); // 🔥 최대 5분 녹음 제한 타이머
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
           // 🚀 [중요] 반드시 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
@@ -187,14 +188,15 @@
             }
           }, [toastMessage, isSyncing, isSummarizing, recordingField]);
 
-          // 💡 수동 종료 방식이 적용된 음성 인식 시작 및 종료 핸들러
-          const toggleRecording = (processId, field) => {
+          // 💡 수동 종료 방식 및 5분 제한이 적용된 음성 인식 시작 및 종료 핸들러
+          const toggleRecording = async (processId, field) => {
             const fieldKey = `${processId}-${field}`;
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
             // 이미 녹음 중인 필드를 다시 눌렀을 때 (수동 종료 및 요약 시작)
             if (recordingField === fieldKey) {
               manualStopRef.current = true; // 수동으로 종료했음을 표시
+              if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current); // 타이머 해제
               if (recognitionRef.current) {
                 recognitionRef.current.stop(); // onend 이벤트를 트리거함
               }
@@ -207,8 +209,26 @@
                 return;
               }
 
+              // 🔥 브라우저 마이크 팝업이 1회만 뜨도록 명시적으로 권한 요청 후 기억하게 함
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop()); // 권한만 얻고 즉시 해제 (시스템이 기억함)
+              } catch (err) {
+                alert("마이크 권한이 거부되었습니다. 스마트폰 설정이나 브라우저 주소창 좌측의 자물쇠 아이콘을 눌러 마이크 권한을 '허용'으로 변경해주세요.");
+                return;
+              }
+
               manualStopRef.current = false; // 시작 시 수동 종료 상태 초기화
               if (recognitionRef.current) recognitionRef.current.stop();
+              if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+
+              // 🔥 최대 5분(300,000ms) 자동 종료 타이머 설정
+              recordingTimerRef.current = setTimeout(() => {
+                setToastMessage('⏳ 최대 녹음 시간(5분)에 도달하여 자동 종료 및 요약을 시작합니다.');
+                manualStopRef.current = true;
+                if (recognitionRef.current) recognitionRef.current.stop();
+                setRecordingField(null);
+              }, 5 * 60 * 1000); // 5분 = 300,000 밀리초
 
               const recognition = new SpeechRecognition();
               recognition.lang = 'ko-KR';
@@ -512,37 +532,8 @@
             <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
               <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
                 
-                {/* 🔥 상세 진행률 오버레이 모달 */}
-                {isSyncing && (
-                  <div className="absolute inset-0 bg-slate-900/80 z-[100] flex items-center justify-center p-6 backdrop-blur-sm transition-opacity">
-                    <div className="bg-white rounded-2xl p-6 w-full shadow-2xl flex flex-col items-center">
-                      <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-                      <h3 className="text-xl font-black text-slate-800 mb-2">서버 전송 중...</h3>
-                      <p className="text-sm font-bold text-slate-500 mb-6 text-center h-10 break-keep">
-                        {uploadProgress.text}
-                      </p>
-                      
-                      {/* 프로그레스 바 영역 */}
-                      <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden border border-slate-200 shadow-inner">
-                        <div 
-                          className="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden" 
-                          style={{ width: `${uploadProgress.percentage}%` }}
-                        >
-                          <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
-                        </div>
-                      </div>
-                      
-                      <div className="w-full flex justify-between items-center px-1">
-                        <span className="text-xs font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
-                        <span className="text-sm font-black text-blue-600">{uploadProgress.percentage}%</span>
-                      </div>
-                      
-                      <p className="text-[10px] text-slate-400 mt-5 text-center leading-relaxed">
-                        ⚠️ 대용량 동영상 전송 시 1~2분이 소요될 수 있습니다.<br/><strong className="text-red-500">절대 스마트폰 화면을 끄거나 앱을 닫지 마세요!</strong>
-                      </p>
-                    </div>
-                  </div>
-                )}
+                {/* 화면 터치 방지용 투명 막 (전송 중 엉뚱한 곳을 누르지 못하게 방어) */}
+                {isSyncing && <div className="fixed inset-0 z-40 bg-transparent"></div>}
 
                 {/* Toast 알림창 (오버레이 모달이 없을 때만) */}
                 {toastMessage && !isSyncing && (
@@ -555,7 +546,7 @@
                 )}
 
                 {/* App Header */}
-                <header className="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-md flex justify-between items-center">
+                <header className="bg-blue-600 text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <ChevronLeft className="w-6 h-6" />
                     <div>
@@ -577,14 +568,46 @@
                     >
                       <RefreshCw className="w-4 h-4" /> 초기화
                     </button>
-                    <button 
-                      onClick={handleManualSave}
-                      disabled={isSyncing || isSummarizing}
-                      className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
-                    >
-                      {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                      {isSyncing ? '저장중' : '최종저장'}
-                    </button>
+                    
+                    {/* 최종저장 버튼 그룹 (버튼과 진행률 팝업을 묶음) */}
+                    <div className="relative">
+                      <button 
+                        onClick={handleManualSave}
+                        disabled={isSyncing || isSummarizing}
+                        className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
+                      >
+                        {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        {isSyncing ? '저장중' : '최종저장'}
+                      </button>
+
+                      {/* 🔥 최종저장 버튼 바로 아래에 뜨는 업로드 진행률 알림창 */}
+                      {isSyncing && (
+                        <div className="absolute top-[calc(100%+12px)] right-0 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-[100] text-slate-800 animate-in slide-in-from-top-2">
+                          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
+                            <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+                            <h3 className="font-bold text-sm text-slate-800">서버 전송 중...</h3>
+                          </div>
+                          
+                          <p className="text-[11px] font-bold text-slate-500 mb-3 break-keep leading-tight h-8">
+                            {uploadProgress.text}
+                          </p>
+                          
+                          <div className="w-full bg-slate-100 rounded-full h-2 mb-1.5 overflow-hidden border border-slate-200 shadow-inner">
+                            <div 
+                              className="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden" 
+                              style={{ width: `${uploadProgress.percentage}%` }}
+                            >
+                              <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
+                            </div>
+                          </div>
+                          
+                          <div className="w-full flex justify-between items-center px-1">
+                            <span className="text-[10px] font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
+                            <span className="text-xs font-black text-blue-600">{uploadProgress.percentage}%</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </header>
 
