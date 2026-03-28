@@ -36,6 +36,7 @@
         const RefreshCw = ({className}) => <Icon className={className} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Cloud = ({className}) => <Icon className={className} path={<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>} />;
         const Mic = ({className}) => <Icon className={className} path={<><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></>} />;
+        const Folder = ({className}) => <Icon className={className} path={<><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></>} />;
 
         // --- 선택 옵션 ---
         const WORKLOAD_OPTIONS = [
@@ -148,6 +149,9 @@
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
+          // 💡 카메라 앱 선택 커스텀 팝업용 State 추가
+          const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
+
           // 💡 음성 인식 및 요약 관련 State
           const [recordingField, setRecordingField] = useState(null); // 'processId-field' 형식
           const [isSummarizing, setIsSummarizing] = useState(false);
@@ -236,14 +240,18 @@
               recognition.interimResults = true;
               transcriptRef.current = '';
 
+              // 🔥 중복 입력 방지를 위한 세션별 텍스트 변수 추가
+              let currentSessionTranscript = '';
+
               recognition.onresult = (event) => {
-                let finalSegment = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                let sessionFinal = '';
+                // resultIndex를 사용하지 않고 0부터 다시 읽어 세션 텍스트를 재구성 (안드로이드 중복 버그 완벽 차단)
+                for (let i = 0; i < event.results.length; ++i) {
                   if (event.results[i].isFinal) {
-                    finalSegment += event.results[i][0].transcript + ' ';
+                    sessionFinal += event.results[i][0].transcript + ' ';
                   }
                 }
-                transcriptRef.current += finalSegment;
+                currentSessionTranscript = sessionFinal;
               };
 
               recognition.onerror = (event) => {
@@ -255,6 +263,12 @@
               };
 
               recognition.onend = async () => {
+                // 💡 마이크가 꺼질 때(세션 종료) 해당 세션의 완성된 문장만 누적하여 텍스트 중복 방지
+                if (currentSessionTranscript.trim()) {
+                  transcriptRef.current += currentSessionTranscript + ' ';
+                  currentSessionTranscript = '';
+                }
+
                 // 🔥 스마트폰/브라우저가 정적 때문에 자동 종료한 경우 -> 수동 종료가 아니므로 다시 강제 실행!
                 if (!manualStopRef.current) {
                   try {
@@ -873,12 +887,14 @@
                                 </div>
                               ))}
                               {safeVideos.length < 4 && (
-                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                <button 
+                                  onClick={() => setVideoPopupProcessId(process.id)}
+                                  className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-blue-500 hover:border-blue-400 cursor-pointer transition-colors relative"
+                                >
                                   <VideoIcon className="w-8 h-8 mb-1" />
-                                  <span className="text-xs font-bold text-slate-600 text-center">동영상 촬영<br/>(또는 파일 선택)</span>
+                                  <span className="text-xs font-bold text-slate-600 text-center">동영상 촬영<br/>(어플 선택)</span>
                                   <span className="text-[10px] text-red-500 mt-1 font-bold">※ 최대 30MB</span>
-                                  <input type="file" accept="video/*" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'video')} />
-                                </label>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -895,6 +911,70 @@
                     <Plus className="w-6 h-6" /> 신규 공정 생성 (기기 임시저장)
                   </button>
                 </div>
+
+                {/* 🔥 카메라 어플 선택 커스텀 팝업 (모달) */}
+                {videoPopupProcessId && (
+                  <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                      <div className="p-5 border-b border-slate-100">
+                        <h3 className="text-lg font-bold text-slate-800">동영상 어플 선택</h3>
+                        <p className="text-xs text-slate-500 mt-1">원하시는 촬영 방식을 선택해 주세요.</p>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        
+                        {/* 옵션 1: 오픈 카메라 등 외부 어플 및 파일/갤러리 */}
+                        <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
+                          <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
+                            <Folder className="w-6 h-6" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-black text-blue-800 text-[15px] mb-0.5">오픈 카메라 / 파일 선택</div>
+                            <div className="text-[11px] font-medium text-blue-600/80 leading-tight">설치된 다른 카메라 앱(오픈 카메라 등)이나 갤러리에서 선택합니다.</div>
+                          </div>
+                          <input 
+                            type="file" 
+                            accept="video/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              setVideoPopupProcessId(null);
+                            }} 
+                          />
+                        </label>
+
+                        {/* 옵션 2: 기본 카메라 */}
+                        <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
+                          <div className="bg-slate-300 p-2.5 rounded-full text-slate-600 shrink-0">
+                            <Camera className="w-6 h-6" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-slate-700 text-[15px] mb-0.5">기본 카메라 바로실행</div>
+                            <div className="text-[11px] font-medium text-slate-500 leading-tight">빠르게 기본 카메라를 켭니다.<br/>(반드시 저화질 설정 후 촬영 요망)</div>
+                          </div>
+                          <input 
+                            type="file" 
+                            accept="video/*" 
+                            capture="environment" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              setVideoPopupProcessId(null);
+                            }} 
+                          />
+                        </label>
+
+                      </div>
+                      <div className="p-4 bg-slate-50 border-t border-slate-100">
+                        <button 
+                          onClick={() => setVideoPopupProcessId(null)}
+                          className="w-full py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
