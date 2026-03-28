@@ -153,6 +153,7 @@
           const [isSummarizing, setIsSummarizing] = useState(false);
           const recognitionRef = useRef(null);
           const transcriptRef = useRef('');
+          const manualStopRef = useRef(false); // 🔥 수동 종료 여부를 추적하기 위한 Ref
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
           // 🚀 [중요] 반드시 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
@@ -180,19 +181,20 @@
           }, []);
 
           useEffect(() => {
-            if (toastMessage && !isSyncing && !isSummarizing) {
+            if (toastMessage && !isSyncing && !isSummarizing && !recordingField) {
               const timer = setTimeout(() => setToastMessage(''), 3000);
               return () => clearTimeout(timer);
             }
-          }, [toastMessage, isSyncing, isSummarizing]);
+          }, [toastMessage, isSyncing, isSummarizing, recordingField]);
 
-          // 💡 음성 인식 시작 및 종료 핸들러
+          // 💡 수동 종료 방식이 적용된 음성 인식 시작 및 종료 핸들러
           const toggleRecording = (processId, field) => {
             const fieldKey = `${processId}-${field}`;
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-            // 이미 녹음 중인 필드를 다시 눌렀을 때 (종료 및 요약 시작)
+            // 이미 녹음 중인 필드를 다시 눌렀을 때 (수동 종료 및 요약 시작)
             if (recordingField === fieldKey) {
+              manualStopRef.current = true; // 수동으로 종료했음을 표시
               if (recognitionRef.current) {
                 recognitionRef.current.stop(); // onend 이벤트를 트리거함
               }
@@ -205,6 +207,7 @@
                 return;
               }
 
+              manualStopRef.current = false; // 시작 시 수동 종료 상태 초기화
               if (recognitionRef.current) recognitionRef.current.stop();
 
               const recognition = new SpeechRecognition();
@@ -223,7 +226,26 @@
                 transcriptRef.current += finalSegment;
               };
 
+              recognition.onerror = (event) => {
+                console.error("음성 인식 에러:", event.error);
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                  manualStopRef.current = true; // 에러 시 무한 재시작 방지
+                  setRecordingField(null);
+                }
+              };
+
               recognition.onend = async () => {
+                // 🔥 스마트폰/브라우저가 정적 때문에 자동 종료한 경우 -> 수동 종료가 아니므로 다시 강제 실행!
+                if (!manualStopRef.current) {
+                  try {
+                    recognition.start();
+                  } catch (e) {
+                    console.error("음성인식 재시작 실패:", e);
+                  }
+                  return; // 요약 로직으로 넘어가지 않고 빠져나옴
+                }
+
+                // 수동으로 [녹음 종료] 버튼을 누른 경우에만 아래 요약 로직 실행
                 const textToSummarize = transcriptRef.current.trim();
                 transcriptRef.current = ''; // 텍스트 초기화
                 setRecordingField(null); // UI 녹음 상태 해제
@@ -267,7 +289,7 @@
                 recognition.start();
                 recognitionRef.current = recognition;
                 setRecordingField(fieldKey);
-                setToastMessage('🎙️ 대화 녹음 중... 대화가 끝나면 마이크 버튼을 한 번 더 누르세요.');
+                setToastMessage('🎙️ 대화 녹음 중... (직접 종료 버튼을 누를 때까지 꺼지지 않습니다)');
               } catch(e) {
                 console.error("마이크 권한 등 오류:", e);
                 alert("마이크 접근이 거부되었습니다. 스마트폰 설정에서 브라우저의 마이크 권한을 허용해주세요.");
@@ -613,30 +635,39 @@
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 작업내용 (AI 음성인식 포함) */}
+                          {/* 1. 작업내용 (AI 음성인식 + 삭제 버튼 포함) */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
                                 <span className="text-blue-500">1.</span> 작업내용
                               </label>
-                              <button 
-                                onClick={() => toggleRecording(process.id, 'workContent')}
-                                disabled={isSummarizing && recordingField !== `${process.id}-workContent`}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all shadow-sm ${
-                                  recordingField === `${process.id}-workContent` 
-                                    ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
-                                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
-                                }`}
-                              >
-                                {recordingField === `${process.id}-workContent` ? (
-                                  <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
-                                ) : (
-                                  <><Mic className="w-3.5 h-3.5 text-blue-500" /> 음성 요약</>
-                                )}
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {/* 🔥 내용 삭제 버튼 추가 */}
+                                <button 
+                                  onClick={() => updateProcess(process.id, 'workContent', '')}
+                                  className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> 삭제
+                                </button>
+                                <button 
+                                  onClick={() => toggleRecording(process.id, 'workContent')}
+                                  disabled={isSummarizing && recordingField !== `${process.id}-workContent`}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all shadow-sm ${
+                                    recordingField === `${process.id}-workContent` 
+                                      ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
+                                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
+                                  }`}
+                                >
+                                  {recordingField === `${process.id}-workContent` ? (
+                                    <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
+                                  ) : (
+                                    <><Mic className="w-3.5 h-3.5 text-blue-500" /> 음성 요약</>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             <textarea 
-                              rows="2" placeholder="주요 작업 내용을 입력하거나 우측의 마이크를 눌러 대화를 녹음하세요."
+                              rows="2" placeholder="주요 작업 내용을 직접 입력하거나, 우측의 마이크를 눌러 대화를 요약하세요."
                               className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
                                 recordingField === `${process.id}-workContent` ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
                               }`}
@@ -697,30 +728,39 @@
                             </div>
                           </div>
 
-                          {/* 3. 작업정보 (AI 음성인식 포함) */}
+                          {/* 3. 작업정보 (AI 음성인식 + 삭제 버튼 포함) */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
                                 <span className="text-blue-500">3.</span> 작업정보
                               </label>
-                              <button 
-                                onClick={() => toggleRecording(process.id, 'workInfo')}
-                                disabled={isSummarizing && recordingField !== `${process.id}-workInfo`}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all shadow-sm ${
-                                  recordingField === `${process.id}-workInfo` 
-                                    ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
-                                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
-                                }`}
-                              >
-                                {recordingField === `${process.id}-workInfo` ? (
-                                  <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
-                                ) : (
-                                  <><Mic className="w-3.5 h-3.5 text-blue-500" /> 음성 요약</>
-                                )}
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {/* 🔥 내용 삭제 버튼 추가 */}
+                                <button 
+                                  onClick={() => updateProcess(process.id, 'workInfo', '')}
+                                  className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> 삭제
+                                </button>
+                                <button 
+                                  onClick={() => toggleRecording(process.id, 'workInfo')}
+                                  disabled={isSummarizing && recordingField !== `${process.id}-workInfo`}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all shadow-sm ${
+                                    recordingField === `${process.id}-workInfo` 
+                                      ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
+                                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
+                                  }`}
+                                >
+                                  {recordingField === `${process.id}-workInfo` ? (
+                                    <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
+                                  ) : (
+                                    <><Mic className="w-3.5 h-3.5 text-blue-500" /> 음성 요약</>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             <textarea 
-                              rows="2" placeholder="취급 무게, 작업 자세 등 상세 정보를 입력하거나 마이크로 요약하세요."
+                              rows="2" placeholder="취급 무게, 작업 자세 등 상세 정보를 직접 입력하거나 마이크로 요약하세요."
                               className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
                                 recordingField === `${process.id}-workInfo` ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
                               }`}
