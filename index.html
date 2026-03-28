@@ -650,6 +650,7 @@
                                   <VideoIcon className="w-8 h-8 mb-1" />
                                   <span className="text-xs font-bold text-slate-600">동영상 촬영</span>
                                   <span className="text-[10px] text-red-500 mt-1 font-bold">※ 최대 30MB</span>
+                                  {/* capture="environment" 속성을 삭제하여 안드로이드 작업 선택 팝업이 뜨도록 유도합니다 */}
                                   <input type="file" accept="video/*" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'video')} />
                                 </label>
                               )}
