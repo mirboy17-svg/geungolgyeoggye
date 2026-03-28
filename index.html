@@ -37,6 +37,7 @@
         const Cloud = ({className}) => <Icon className={className} path={<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>} />;
         const Mic = ({className}) => <Icon className={className} path={<><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></>} />;
         const Folder = ({className}) => <Icon className={className} path={<><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></>} />;
+        const ImageIcon = ({className}) => <Icon className={className} path={<><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>} />;
 
         // --- 선택 옵션 ---
         const WORKLOAD_OPTIONS = [
@@ -113,13 +114,21 @@
           });
         };
 
-        // 💡 AI 대화 요약 (Gemini API) 함수
+        // 💡 AI 대화 요약 (Gemini API) 함수 - 프롬프트 강화
         const summarizeTextWithRetry = async (text, field, retries = 5) => {
           const apiKey = ""; // API Key는 실행 환경에서 자동 주입됩니다.
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
           
           const fieldName = field === 'workContent' ? '작업내용' : '작업정보(취급 무게, 자세, 빈도 등)';
-          const prompt = `당신은 산업보건 전문가입니다. 현장 조사자와 근로자의 대화를 요약해 주세요.\n목적: 근골격계 유해요인 조사표의 '${fieldName}' 란에 입력하기 위함\n규칙: 대화 내용을 바탕으로 평서문(~함, ~임)으로 간결하고 핵심적인 내용만 1~2문장으로 요약하세요.\n\n[대화 내용]\n${text}`;
+          const prompt = `너는 산업보건 전문가야. 다음은 근로자와의 근골격계 유해요인 조사 인터뷰(음성 인식 텍스트)야. 아래 규칙을 엄격하게 지켜서 근골격계 유해요인 조사표의 '${fieldName}' 란에 들어갈 내용만 요약해 줘.
+
+[필터링 및 작성 규칙]
+1. '어', '그', '음' 같은 추임새, 감탄사, 감정적인 호소(예: 아프다, 힘들다), 날씨나 일상 이야기 등 조사와 무관한 내용은 100% 삭제해.
+2. 답변을 구어체가 아닌, 객관적이고 건조한 보고서용 명사형 문장(~음, ~함)으로 변환해.
+3. 오직 '${fieldName}'과 관련된 핵심 팩트(Fact)만 1~2문장으로 정리해.
+
+[대화 내용]
+${text}`;
           
           const payload = { contents: [{ parts: [{ text: prompt }] }] };
           
@@ -149,7 +158,7 @@
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
-          // 💡 카메라 앱 선택 커스텀 팝업용 State 추가
+          // 💡 카메라 앱 선택 팝업용 State 추가
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
 
           // 💡 음성 인식 및 요약 관련 State
@@ -889,7 +898,7 @@
                               {safeVideos.length < 4 && (
                                 <button 
                                   onClick={() => setVideoPopupProcessId(process.id)}
-                                  className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-blue-500 hover:border-blue-400 cursor-pointer transition-colors relative"
+                                  className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
                                 >
                                   <VideoIcon className="w-8 h-8 mb-1" />
                                   <span className="text-xs font-bold text-slate-600 text-center">동영상 촬영<br/>(어플 선택)</span>
@@ -912,24 +921,26 @@
                   </button>
                 </div>
 
-                {/* 🔥 카메라 어플 선택 커스텀 팝업 (모달) */}
+                {/* 🔥 동영상 카메라 어플 선택 커스텀 팝업 (모달) */}
                 {videoPopupProcessId && (
                   <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                      <div className="p-5 border-b border-slate-100">
-                        <h3 className="text-lg font-bold text-slate-800">동영상 어플 선택</h3>
-                        <p className="text-xs text-slate-500 mt-1">원하시는 촬영 방식을 선택해 주세요.</p>
+                      <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-800">동영상 촬영/첨부 방식</h3>
+                          <p className="text-xs text-slate-500 mt-1">원하시는 방식을 선택해 주세요.</p>
+                        </div>
                       </div>
                       <div className="p-4 space-y-3">
                         
-                        {/* 옵션 1: 오픈 카메라 등 외부 어플 및 파일/갤러리 */}
-                        <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
-                          <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
-                            <Folder className="w-6 h-6" />
+                        {/* 옵션 1: 오픈 카메라 (어플 선택) */}
+                        <label className="flex items-center gap-4 p-4 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer hover:bg-purple-100 transition-colors shadow-sm">
+                          <div className="bg-purple-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
+                            <VideoIcon className="w-6 h-6" />
                           </div>
                           <div className="flex-1">
-                            <div className="font-black text-blue-800 text-[15px] mb-0.5">오픈 카메라 / 파일 선택</div>
-                            <div className="text-[11px] font-medium text-blue-600/80 leading-tight">설치된 다른 카메라 앱(오픈 카메라 등)이나 갤러리에서 선택합니다.</div>
+                            <div className="font-black text-purple-800 text-[15px] mb-0.5">오픈 카메라 (어플 선택)</div>
+                            <div className="text-[11px] font-medium text-purple-600/80 leading-tight">작업 선택 창이 뜨면 '오픈 카메라'를 골라 촬영합니다.</div>
                           </div>
                           <input 
                             type="file" 
@@ -942,19 +953,40 @@
                           />
                         </label>
 
-                        {/* 옵션 2: 기본 카메라 */}
-                        <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
-                          <div className="bg-slate-300 p-2.5 rounded-full text-slate-600 shrink-0">
+                        {/* 옵션 2: 기본 카메라 바로 실행 */}
+                        <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
+                          <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <Camera className="w-6 h-6" />
                           </div>
                           <div className="flex-1">
-                            <div className="font-bold text-slate-700 text-[15px] mb-0.5">기본 카메라 바로실행</div>
-                            <div className="text-[11px] font-medium text-slate-500 leading-tight">빠르게 기본 카메라를 켭니다.<br/>(반드시 저화질 설정 후 촬영 요망)</div>
+                            <div className="font-bold text-blue-800 text-[15px] mb-0.5">기본 카메라 (바로 실행)</div>
+                            <div className="text-[11px] font-medium text-blue-600/80 leading-tight">스마트폰 내장 카메라를 즉시 켭니다. (저화질 설정 필수)</div>
                           </div>
+                          {/* capture="environment"를 통해 강제 호출 */}
                           <input 
                             type="file" 
                             accept="video/*" 
                             capture="environment" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              setVideoPopupProcessId(null);
+                            }} 
+                          />
+                        </label>
+
+                        {/* 옵션 3: 갤러리 */}
+                        <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors shadow-sm">
+                          <div className="bg-slate-400 p-2.5 rounded-full text-white shrink-0 shadow-md">
+                            <ImageIcon className="w-6 h-6" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-slate-700 text-[15px] mb-0.5">갤러리 (파일 첨부)</div>
+                            <div className="text-[11px] font-medium text-slate-500 leading-tight">스마트폰 갤러리에 저장된 동영상 파일을 불러옵니다.</div>
+                          </div>
+                          <input 
+                            type="file" 
+                            accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
                               handleMediaCapture(e, videoPopupProcessId, 'video');
@@ -975,6 +1007,7 @@
                     </div>
                   </div>
                 )}
+
               </div>
             </div>
           );
