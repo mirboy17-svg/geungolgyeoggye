@@ -56,7 +56,7 @@
           { value: 5, label: '초과근무시간(1일8시간 이상)' }
         ];
 
-        // 작업 시간 옵션 (30분 단위 세분화)
+        // 작업 시간 옵션
         const WORK_START_HOURS = ['06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00'];
         const WORK_END_HOURS = ['15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00'];
         const LUNCH_START_HOURS = ['11:00', '11:30', '12:00', '12:30', '13:00'];
@@ -114,28 +114,31 @@
           });
         };
 
-        // 💡 AI 대화 요약 (Gemini API) 함수 - 프롬프트 강화 및 응답 속도 최적화
+        // 💡 AI 대화 요약 (Gemini API) - '라이너 회의록 자동화' 스타일로 프롬프트 전면 개편
         const summarizeTextWithRetry = async (text, field, retries = 5) => {
           const apiKey = ""; // API Key는 실행 환경에서 자동 주입됩니다.
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
           
           const fieldName = field === 'workContent' ? '작업내용' : '작업정보(취급 무게, 자세, 빈도 등)';
-          const prompt = `너는 산업보건 전문가야. 다음은 근로자와의 근골격계 유해요인 조사 인터뷰(음성 인식 텍스트)야. 아래 규칙을 엄격하게 지켜서 근골격계 유해요인 조사표의 '${fieldName}' 란에 들어갈 내용만 요약해 줘.
+          const prompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI(Liner 스타일)'입니다. 근로자와의 인터뷰 음성 텍스트를 분석하여, '${fieldName}' 항목에 맞게 구조화된 요약 보고서를 작성해 주세요.
 
-[필터링 및 작성 규칙]
-1. '어', '그', '음' 같은 추임새, 감탄사, 감정적인 호소(예: 아프다, 힘들다), 날씨나 일상 이야기 등 조사와 무관한 내용은 100% 삭제해.
-2. 답변을 구어체가 아닌, 객관적이고 건조한 보고서용 명사형 문장(~음, ~함)으로 변환해.
-3. 오직 '${fieldName}'과 관련된 핵심 팩트(Fact)만 1~2문장으로 정리해.
+[회의록 요약 및 자동화 규칙]
+1. 불필요한 추임새('어', '음'), 인사말, 잡담 등은 100% 제거합니다.
+2. 인터뷰 내용을 단순히 줄글로 나열하지 않고, 카테고리별로 구조화(기호 '-' 활용)하여 가독성을 극대화합니다.
+3. 모든 문장은 객관적이고 명확한 보고서 어조(~함, ~임)로 변환합니다.
+4. 작업과 관련된 구체적인 수치(무게, 횟수, 시간)와 위험 요인(불편 호소, 불안정한 자세)을 정확히 포착하여 기재합니다.
 
-[대화 내용]
+[출력 포맷: ${fieldName === '작업내용' ? '작업내용' : '작업정보'}에 맞게 자동 구성]
+${fieldName === '작업내용' ? `■ 핵심 요약\n- \n■ 세부 작업 순서\n- \n- ` : `■ 취급 중량 및 빈도\n- \n■ 주요 작업 자세\n- \n■ 특이/불편사항\n- `}
+
+[실제 인터뷰 대화 내용]
 ${text}`;
           
           const payload = { 
             contents: [{ parts: [{ text: prompt }] }],
-            // 🔥 생성 속도 극대화 설정
             generationConfig: {
               temperature: 0.1, // 창의성 제거 (빠른 연산 및 일관된 보고서체)
-              maxOutputTokens: 150 // 최대 답변 길이 제한 (생성 속도 비약적 향상)
+              maxOutputTokens: 300 // 구조화된 회의록 출력을 위해 토큰 여유 확보 (150 -> 300)
             }
           };
           
@@ -161,7 +164,7 @@ ${text}`;
           const [companyName, setCompanyName] = useState('');
           const [processes, setProcesses] = useState([emptyProcess()]);
           const [toastMessage, setToastMessage] = useState('');
-          const [isSyncing, setIsSyncing] = useState(false);
+          const [isSyncing, setIsSyncing] = useState(false); // 전체 동기화 화면
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
@@ -169,13 +172,13 @@ ${text}`;
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
 
           // 💡 음성 인식 및 요약 관련 State
-          const [recordingField, setRecordingField] = useState(null); // 'processId-field' 형식
+          const [recordingField, setRecordingField] = useState(null); 
           const [isSummarizing, setIsSummarizing] = useState(false);
           const recognitionRef = useRef(null);
           const transcriptRef = useRef('');
-          const currentSessionTextRef = useRef(''); // 🔥 중복 방지용 임시 텍스트 추가
-          const manualStopRef = useRef(false); // 🔥 수동 종료 여부를 추적하기 위한 Ref
-          const recordingTimerRef = useRef(null); // 🔥 최대 5분 녹음 제한 타이머
+          const currentSessionTextRef = useRef(''); 
+          const manualStopRef = useRef(false); 
+          const recordingTimerRef = useRef(null); 
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
           // 🚀 [중요] 반드시 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
@@ -209,19 +212,16 @@ ${text}`;
             }
           }, [toastMessage, isSyncing, isSummarizing, recordingField]);
 
-          // 💡 즉시 요약 실행 함수 (대기 시간 단축)
+          // 즉시 요약 실행 함수
           const executeSummary = async (textToSummarize, processId, field) => {
             if (textToSummarize.length === 0) {
               setToastMessage('⚠️ 입력된 음성이 없습니다.');
               return;
             }
-            
             setToastMessage('⏳ AI가 대화 내용을 즉시 요약 중입니다...');
             setIsSummarizing(true);
-            
             try {
               const summary = await summarizeTextWithRetry(textToSummarize, field);
-              
               setProcesses(prev => prev.map(p => {
                 if (p.id === processId) {
                   const existingText = p[field] ? p[field] + '\n' : '';
@@ -245,80 +245,66 @@ ${text}`;
             }
           };
 
-          // 💡 수동 종료 방식, 중복 차단 및 초고속 실행 핸들러
+          // 수동 종료 방식 음성인식
           const toggleRecording = async (processId, field) => {
             const fieldKey = `${processId}-${field}`;
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-            // 이미 녹음 중인 필드를 다시 눌렀을 때 (수동 종료 및 즉각 요약 시작)
             if (recordingField === fieldKey) {
-              manualStopRef.current = true; // 수동으로 종료했음을 표시
-              if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current); // 타이머 해제
+              manualStopRef.current = true;
+              if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
               
-              // 🚀 onend 대기 없이 텍스트 즉시 수합
               const finalText = (transcriptRef.current + ' ' + currentSessionTextRef.current).trim();
-              
               if (recognitionRef.current) {
-                recognitionRef.current.onend = null; // 이벤트 꼬임 방지
-                recognitionRef.current.abort(); // 🚀 stop() 대신 abort()로 딜레이 없이 마이크 즉각 차단
+                recognitionRef.current.onend = null; 
+                recognitionRef.current.abort(); 
               }
-              
               setRecordingField(null);
               transcriptRef.current = '';
               currentSessionTextRef.current = '';
-              
-              // 즉시 요약 실행 (버튼 누르자마자 실행)
               executeSummary(finalText, processId, field);
             } 
-            // 새로운 필드 녹음 시작
             else {
               if (!SpeechRecognition) {
-                alert('해당 브라우저에서는 음성 인식을 지원하지 않습니다. 크롬 또는 사파리를 이용해주세요.');
+                alert('해당 브라우저에서는 음성 인식을 지원하지 않습니다.');
                 return;
               }
 
-              // 🔥 브라우저 마이크 팝업이 1회만 뜨도록 명시적으로 권한 요청 후 기억하게 함
               try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(track => track.stop()); // 권한만 얻고 즉시 해제 (시스템이 기억함)
+                stream.getTracks().forEach(track => track.stop()); 
               } catch (err) {
-                alert("마이크 권한이 거부되었습니다. 스마트폰 설정이나 브라우저 주소창 좌측의 자물쇠 아이콘을 눌러 마이크 권한을 '허용'으로 변경해주세요.");
+                alert("마이크 권한이 거부되었습니다. 권한을 '허용'으로 변경해주세요.");
                 return;
               }
 
-              manualStopRef.current = false; // 시작 시 수동 종료 상태 초기화
+              manualStopRef.current = false; 
               transcriptRef.current = '';
               currentSessionTextRef.current = '';
               if (recognitionRef.current) recognitionRef.current.abort();
               if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
 
-              // 🔥 최대 5분(300,000ms) 자동 종료 타이머 설정
               recordingTimerRef.current = setTimeout(() => {
-                setToastMessage('⏳ 최대 녹음 시간(5분)에 도달하여 자동 종료 및 요약을 시작합니다.');
+                setToastMessage('⏳ 최대 녹음 시간(5분)에 도달하여 요약을 시작합니다.');
                 manualStopRef.current = true;
-                
                 const finalText = (transcriptRef.current + ' ' + currentSessionTextRef.current).trim();
                 if (recognitionRef.current) {
                   recognitionRef.current.onend = null;
                   recognitionRef.current.abort();
                 }
-                
                 setRecordingField(null);
                 transcriptRef.current = '';
                 currentSessionTextRef.current = '';
-                
                 executeSummary(finalText, processId, field);
-              }, 5 * 60 * 1000); // 5분 = 300,000 밀리초
+              }, 5 * 60 * 1000); 
 
-              // 🚀 중복 타이핑 완벽 차단을 위해 continuous = false 활용
               const recognition = new SpeechRecognition();
               recognition.lang = 'ko-KR';
-              recognition.continuous = false; // 안드로이드의 중복 입력 버그 방지 (문장이 끝나면 자동 onend 발생)
+              recognition.continuous = false; 
               recognition.interimResults = true;
 
               recognition.onresult = (event) => {
                 let sessionText = '';
-                // continuous=false 이므로 event.results에는 현재 말하고 있는 한 문장만 담김 (중복 누적 원천 차단)
                 for (let i = 0; i < event.results.length; ++i) {
                   sessionText += event.results[i][0].transcript;
                 }
@@ -326,27 +312,19 @@ ${text}`;
               };
 
               recognition.onerror = (event) => {
-                console.error("음성 인식 에러:", event.error);
                 if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                  manualStopRef.current = true; // 에러 시 무한 재시작 방지
+                  manualStopRef.current = true;
                   setRecordingField(null);
                 }
               };
 
               recognition.onend = () => {
-                // 마이크가 닫힐 때마다 현재 문장을 누적 텍스트에 확정적으로 1회 추가
                 if (currentSessionTextRef.current.trim()) {
                   transcriptRef.current += currentSessionTextRef.current.trim() + ' ';
-                  currentSessionTextRef.current = ''; // 임시 변수 비우기
+                  currentSessionTextRef.current = '';
                 }
-
-                // 사용자가 수동으로 종료한 게 아니라면 마이크 즉시 재시작 (녹음 무한 유지)
                 if (!manualStopRef.current) {
-                  try {
-                    recognition.start();
-                  } catch (e) {
-                    console.error("음성인식 재시작 실패:", e);
-                  }
+                  try { recognition.start(); } catch (e) {}
                 }
               };
 
@@ -355,13 +333,110 @@ ${text}`;
                 recognitionRef.current = recognition;
                 setRecordingField(fieldKey);
                 setToastMessage('🎙️ 대화 녹음 중... (직접 종료 버튼을 누를 때까지 꺼지지 않습니다)');
-              } catch(e) {
-                console.error("마이크 권한 등 오류:", e);
-              }
+              } catch(e) { console.error(e); }
             }
           };
 
-          // 🚀 30MB 대용량 분할 전송 시스템
+          // 🚀 [신규 기능] 사진/동영상 첨부 시 구글 드라이브 즉시 업로드 처리
+          const handleMediaCapture = async (e, processId, type) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // 파일 용량 제한 (동영상 30MB)
+            const maxSizeMB = type === 'photo' ? 10 : 30; 
+            if (file.size > maxSizeMB * 1024 * 1024) {
+              alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n\n해결방법: 카메라 설정에서 화질을 낮춰주세요.`);
+              e.target.value = null;
+              return;
+            }
+
+            // 업로드 화면 강제 활성화 (Z-index 120 레벨로 가장 위에 띄움)
+            setIsSyncing(true);
+            setUploadProgress({ 
+              current: 0, total: 1, 
+              text: `☁️ ${type === 'photo' ? '사진' : '동영상'}을 구글 서버로 바로 전송 중입니다... (창을 닫지 마세요)`, 
+              percentage: 20 
+            });
+
+            let base64Data = null; // 🔥 ReferenceError 수정을 위해 변수를 try 블록 바깥으로 이동합니다.
+
+            try {
+              if (type === 'photo') {
+                base64Data = await compressImage(file);
+              } else {
+                base64Data = await new Promise((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result);
+                  reader.readAsDataURL(file);
+                });
+              }
+
+              setUploadProgress({ current: 0, total: 1, text: `☁️ 구글 드라이브에 저장 중...`, percentage: 60 });
+
+              // 공정명 파악 후 파일명 생성
+              const currentProcess = processes.find(p => p.id === processId);
+              const pName = currentProcess?.processName || '미지정공정';
+              const fileExt = type === 'photo' ? 'jpg' : 'mp4';
+              const fileName = `${companyName || '미지정사업체'}_${pName}_${type === 'photo' ? '사진' : '동영상'}_${Date.now()}.${fileExt}`;
+
+              if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
+                 throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
+              }
+
+              // 구글 앱스 스크립트로 1건 즉시 전송
+              const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+              const response = await fetch(fetchUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                  type: 'media',
+                  folderId: TARGET_FOLDER_ID,
+                  fileName: fileName,
+                  fileData: base64Data
+                })
+              });
+              
+              const result = await response.json();
+              if (result.status !== "success") throw new Error(result.message);
+
+              setUploadProgress({ current: 1, total: 1, text: `✅ 업로드 완료!`, percentage: 100 });
+
+              // 완료되면 상태에 기록 (이미 업로드 되었으므로 isUploaded: true 부여)
+              // 이후 최종저장 시 이 파일은 재업로드하지 않습니다.
+              const mediaObj = { isUploaded: true, base64: base64Data, fileName: fileName };
+              
+              setProcesses(processes.map(p => {
+                  if (p.id === processId) {
+                      return type === 'photo' 
+                          ? { ...p, photos: [...(p.photos || []), mediaObj] }
+                          : { ...p, videos: [...(p.videos || []), mediaObj] };
+                  }
+                  return p;
+              }));
+
+              setTimeout(() => setIsSyncing(false), 800);
+
+            } catch (error) {
+              console.error(error);
+              alert("🚨 즉시 전송 실패: " + error.message + "\n\n오프라인 모드로 휴대폰에 임시 저장합니다. (나중에 최종저장 시 함께 전송됩니다.)");
+              
+              // 실패 시 기존처럼 객체 형태가 아닌 일반 문자열(base64)로 저장하여 최종저장 때 다시 시도하도록 함
+              if (base64Data) {
+                setProcesses(processes.map(p => {
+                    if (p.id === processId) {
+                        return type === 'photo' 
+                            ? { ...p, photos: [...(p.photos || []), base64Data] }
+                            : { ...p, videos: [...(p.videos || []), base64Data] };
+                    }
+                    return p;
+                }));
+              }
+              setIsSyncing(false);
+            }
+            e.target.value = null; // 인풋 초기화
+          };
+
+          // 🚀 최종 텍스트 데이터 전송 (이미 전송된 동영상은 패스하여 1초 만에 끝남)
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             localStorage.setItem('localCompanyName', companyName);
@@ -385,22 +460,29 @@ ${text}`;
 
               const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
 
+              // 텍스트 데이터 세팅
               const spreadsheetPayload = {
                 type: 'spreadsheet',
                 folderId: TARGET_FOLDER_ID,
-                // 파일명을 단위사업체명으로 저장
                 spreadsheetName: companyName || '미지정사업체',
                 processes: data.map((p, index) => {
                   const processName = p.processName || `미지정_공정_${index + 1}`;
-                  
-                  // 선택된 작업시간을 문자열로 포맷팅
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
                   
-                  (p.photos || []).forEach((base64, i) => {
-                    mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: base64 });
+                  // 🔥 이미 "즉시 업로드" 되지 못한(오프라인 등) 사진/영상만 재전송 큐에 넣습니다.
+                  (p.photos || []).forEach((photoItem, i) => {
+                    if (typeof photoItem === 'string') {
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: photoItem });
+                    } else if (photoItem && !photoItem.isUploaded) {
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: photoItem.base64 });
+                    }
                   });
-                  (p.videos || []).forEach((base64, i) => {
-                    mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: base64 });
+                  (p.videos || []).forEach((videoItem, i) => {
+                     if (typeof videoItem === 'string') {
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: videoItem });
+                    } else if (videoItem && !videoItem.isUploaded) {
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: videoItem.base64 });
+                    }
                   });
 
                   return {
@@ -427,7 +509,8 @@ ${text}`;
                 setUploadProgress({ current: completedTasks, total: totalTasks, text, percentage });
               };
 
-              updateProgress('☁️ 텍스트 데이터(스프레드시트) 전송 중...');
+              // 대부분의 경우 여기서 끝납니다 (1건 - 스프레드시트 텍스트)
+              updateProgress('☁️ 조사표 텍스트 데이터를 전송 중...');
               
               let response = await fetch(fetchUrl, {
                 method: 'POST',
@@ -438,29 +521,30 @@ ${text}`;
               if (result.status !== "success") throw new Error(result.message);
 
               completedTasks++;
-              updateProgress('☁️ 미디어 파일 전송 준비 중...');
-
-              const totalMedia = mediaQueue.length;
-              for (let i = 0; i < totalMedia; i++) {
-                const mediaItem = mediaQueue[i];
-                const isVideo = mediaItem.fileName.includes('동영상');
-                
-                updateProgress(`업로드 중 (${i + 1}/${totalMedia}): ${isVideo ? '동영상 (용량이 커서 1~2분 소요될 수 있습니다)' : '사진'}`);
-                
-                response = await fetch(fetchUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                  body: JSON.stringify(mediaItem)
-                });
-                result = await response.json();
-                if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
-                
-                completedTasks++;
-                updateProgress(`업로드 완료 (${i + 1}/${totalMedia})`);
+              
+              // 만약 이전에 통신 실패로 못 보낸 파일이 있다면 여기서 다시 시도합니다.
+              if (mediaQueue.length > 0) {
+                updateProgress('☁️ 미전송 미디어 파일 동기화 중...');
+                const totalMedia = mediaQueue.length;
+                for (let i = 0; i < totalMedia; i++) {
+                  const mediaItem = mediaQueue[i];
+                  updateProgress(`재업로드 중 (${i + 1}/${totalMedia})`);
+                  
+                  response = await fetch(fetchUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(mediaItem)
+                  });
+                  result = await response.json();
+                  if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
+                  
+                  completedTasks++;
+                  updateProgress(`업로드 완료 (${i + 1}/${totalMedia})`);
+                }
               }
               
               completedTasks = totalTasks;
-              updateProgress('✅ 모든 데이터 전송 완료!');
+              updateProgress('✅ 모든 조사 내용 전송 완료!');
               
               const now = new Date();
               setLastSyncTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
@@ -473,14 +557,14 @@ ${text}`;
                   setProcesses([emptyProcess()]);
                   setToastMessage('✨ 화면이 초기화되었습니다. 새 조사를 시작하세요.');
                 } else {
-                  setToastMessage('✅ 모든 데이터 및 파일 전송 완료!');
+                  setToastMessage('✅ 모든 데이터 전송 완료!');
                 }
                 setIsSyncing(false);
               }, 600);
 
             } catch (error) {
               console.error("업로드 실패:", error);
-              alert("🚨 저장 실패 상세 원인:\n" + error.message + "\n\n(인터넷 연결이 불안정하거나 동영상 용량이 30MB를 초과하여 구글 서버가 응답을 거부했습니다. 동영상을 삭제하고 다시 시도해 보세요.)");
+              alert("🚨 저장 실패: " + error.message);
               setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
               setIsSyncing(false);
             }
@@ -514,44 +598,6 @@ ${text}`;
             setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
-          const handleMediaCapture = async (e, processId, type) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            // 파일 용량 제한 동영상 30MB
-            const maxSizeMB = type === 'photo' ? 10 : 30; 
-            if (file.size > maxSizeMB * 1024 * 1024) {
-              alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n\n${type === 'photo' ? '사진은 10MB' : '동영상은 30MB'} 이하만 첨부 가능합니다.\n\n해결방법: 카메라 설정에서 화질을 반드시 낮춰주세요.`);
-              e.target.value = null;
-              return;
-            }
-
-            setToastMessage('⏳ 미디어 파일 읽는 중...');
-
-            let base64Data;
-            if (type === 'photo') {
-              base64Data = await compressImage(file);
-            } else {
-              base64Data = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(file);
-              });
-            }
-
-            setProcesses(processes.map(p => {
-                if (p.id === processId) {
-                    return type === 'photo' 
-                        ? { ...p, photos: [...(p.photos || []), base64Data] }
-                        : { ...p, videos: [...(p.videos || []), base64Data] };
-                }
-                return p;
-            }));
-            
-            setToastMessage(''); 
-            e.target.value = null;
-          };
-
           const removeMedia = (processId, index, type) => {
             if(confirm(`이 ${type === 'photo' ? '사진' : '동영상'}을 삭제하시겠습니까?`)) {
               setProcesses(processes.map(p => {
@@ -576,11 +622,35 @@ ${text}`;
             <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
               <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
                 
-                {/* 화면 터치 방지용 투명 막 (전송 중 엉뚱한 곳을 누르지 못하게 방어) */}
-                {isSyncing && <div className="fixed inset-0 z-40 bg-transparent"></div>}
+                {/* 🚀 즉시 업로드 진행률 모달 (최상단 z-index 120) */}
+                {isSyncing && (
+                  <div className="fixed inset-0 z-[120] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl p-6 w-full shadow-2xl flex flex-col items-center">
+                      <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                      <h3 className="text-xl font-black text-slate-800 mb-2">서버 통신 중...</h3>
+                      <p className="text-sm font-bold text-slate-500 mb-6 text-center h-10 break-keep">
+                        {uploadProgress.text}
+                      </p>
+                      
+                      <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden border border-slate-200 shadow-inner">
+                        <div 
+                          className="bg-blue-600 h-full rounded-full transition-all duration-300 ease-out relative overflow-hidden" 
+                          style={{ width: `${uploadProgress.percentage}%` }}
+                        >
+                          <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
+                        </div>
+                      </div>
+                      
+                      <div className="w-full flex justify-between items-center px-1">
+                        <span className="text-xs font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
+                        <span className="text-sm font-black text-blue-600">{uploadProgress.percentage}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                {/* Toast 알림창 (오버레이 모달이 없을 때만) */}
-                {toastMessage && !isSyncing && (
+                {/* Toast 알림창 */}
+                {toastMessage && !isSyncing && !isSummarizing && !recordingField && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
                       {toastMessage.includes('중') ? <RefreshCw className="w-5 h-5 text-blue-400 shrink-0 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
@@ -613,45 +683,14 @@ ${text}`;
                       <RefreshCw className="w-4 h-4" /> 초기화
                     </button>
                     
-                    {/* 최종저장 버튼 그룹 (버튼과 진행률 팝업을 묶음) */}
-                    <div className="relative">
-                      <button 
-                        onClick={handleManualSave}
-                        disabled={isSyncing || isSummarizing}
-                        className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
-                      >
-                        {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        {isSyncing ? '저장중' : '최종저장'}
-                      </button>
-
-                      {/* 🔥 최종저장 버튼 바로 아래에 뜨는 업로드 진행률 알림창 */}
-                      {isSyncing && (
-                        <div className="absolute top-[calc(100%+12px)] right-0 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-[100] text-slate-800 animate-in slide-in-from-top-2">
-                          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
-                            <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
-                            <h3 className="font-bold text-sm text-slate-800">서버 전송 중...</h3>
-                          </div>
-                          
-                          <p className="text-[11px] font-bold text-slate-500 mb-3 break-keep leading-tight h-8">
-                            {uploadProgress.text}
-                          </p>
-                          
-                          <div className="w-full bg-slate-100 rounded-full h-2 mb-1.5 overflow-hidden border border-slate-200 shadow-inner">
-                            <div 
-                              className="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden" 
-                              style={{ width: `${uploadProgress.percentage}%` }}
-                            >
-                              <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
-                            </div>
-                          </div>
-                          
-                          <div className="w-full flex justify-between items-center px-1">
-                            <span className="text-[10px] font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
-                            <span className="text-xs font-black text-blue-600">{uploadProgress.percentage}%</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <button 
+                      onClick={handleManualSave}
+                      disabled={isSyncing || isSummarizing}
+                      className={`flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${isSyncing ? 'bg-blue-800 text-blue-300' : 'bg-blue-700 hover:bg-blue-800 active:scale-95'}`}
+                    >
+                      {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {isSyncing ? '저장중' : '최종저장'}
+                    </button>
                   </div>
                 </header>
 
@@ -702,14 +741,13 @@ ${text}`;
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 작업내용 (AI 음성인식 + 삭제 버튼 포함) */}
+                          {/* 1. 작업내용 */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
                                 <span className="text-blue-500">1.</span> 작업내용
                               </label>
                               <div className="flex items-center gap-1.5">
-                                {/* 🔥 내용 삭제 버튼 추가 */}
                                 <button 
                                   onClick={() => updateProcess(process.id, 'workContent', '')}
                                   className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
@@ -733,8 +771,9 @@ ${text}`;
                                 </button>
                               </div>
                             </div>
+                            {/* 내용이 길어지므로 rows를 2에서 4로 변경 */}
                             <textarea 
-                              rows="2" placeholder="주요 작업 내용을 직접 입력하거나, 우측의 마이크를 눌러 대화를 요약하세요."
+                              rows="4" placeholder="주요 작업 내용을 직접 입력하거나, 우측의 마이크를 눌러 회의록을 자동 요약하세요."
                               className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
                                 recordingField === `${process.id}-workContent` ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
                               }`}
@@ -742,13 +781,12 @@ ${text}`;
                             />
                           </div>
 
-                          {/* 2. 작업시간 (30분 단위 세분화된 칩 UI) */}
+                          {/* 2. 작업시간 (칩 UI) */}
                           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
                             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
                               <span className="text-blue-500">2.</span> 작업시간
                             </label>
                             
-                            {/* 업무 시간 */}
                             <div>
                               <div className="text-xs font-bold text-slate-500 mb-1.5">시작 시간 (업무)</div>
                               <div className="flex flex-wrap gap-1.5">
@@ -766,7 +804,6 @@ ${text}`;
                               </div>
                             </div>
 
-                            {/* 점심 시간 */}
                             <div className="pt-2 border-t border-slate-200">
                               <div className="text-xs font-bold text-slate-500 mb-1.5">점심 시작</div>
                               <div className="flex flex-wrap gap-1.5">
@@ -784,7 +821,6 @@ ${text}`;
                               </div>
                             </div>
 
-                            {/* 직접 작성 (기타) */}
                             <div className="pt-2 border-t border-slate-200">
                               <div className="text-xs font-bold text-slate-500 mb-1.5">추가 / 직접 작성</div>
                               <input 
@@ -795,14 +831,13 @@ ${text}`;
                             </div>
                           </div>
 
-                          {/* 3. 작업정보 (AI 음성인식 + 삭제 버튼 포함) */}
+                          {/* 3. 작업정보 */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
                                 <span className="text-blue-500">3.</span> 작업정보
                               </label>
                               <div className="flex items-center gap-1.5">
-                                {/* 🔥 내용 삭제 버튼 추가 */}
                                 <button 
                                   onClick={() => updateProcess(process.id, 'workInfo', '')}
                                   className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
@@ -826,8 +861,9 @@ ${text}`;
                                 </button>
                               </div>
                             </div>
+                            {/* 내용이 길어지므로 rows를 2에서 4로 변경 */}
                             <textarea 
-                              rows="2" placeholder="취급 무게, 작업 자세 등 상세 정보를 직접 입력하거나 마이크로 요약하세요."
+                              rows="4" placeholder="취급 무게, 작업 자세 등 상세 정보를 직접 입력하거나 마이크로 회의록 요약하세요."
                               className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
                                 recordingField === `${process.id}-workInfo` ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
                               }`}
@@ -887,12 +923,21 @@ ${text}`;
                               <span className="text-xs text-slate-400 font-medium">{safePhotos.length}장 / 최대 10장</span>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
-                              {safePhotos.map((photoStr, pIdx) => (
-                                <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
-                                  <img src={photoStr} className="w-full h-full object-cover" />
-                                  <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
-                                </div>
-                              ))}
+                              {safePhotos.map((photoItem, pIdx) => {
+                                // 💡 문자열(구버전)인지 객체(즉시업로드된 신버전)인지 구분하여 렌더링
+                                const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
+                                return (
+                                  <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                                    <img src={srcStr} className="w-full h-full object-cover" />
+                                    {photoItem.isUploaded && (
+                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1">
+                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
+                                      </div>
+                                    )}
+                                    <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
+                                  </div>
+                                )
+                              })}
                               {safePhotos.length < 10 && (
                                 <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
                                   <Camera className="w-8 h-8 mb-2" />
@@ -903,19 +948,28 @@ ${text}`;
                             </div>
                           </div>
 
-                          {/* 6. 동영상 첨부 */}
+                          {/* 6. 동영상 첨부 (즉시업로드 방식) */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
                               <span className="text-xs text-slate-400 font-medium">{safeVideos.length}개 / 최대 4개</span>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
-                              {safeVideos.map((videoStr, vIdx) => (
-                                <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
-                                  <video src={videoStr} controls className="w-full h-full object-cover"></video>
-                                  <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-10"><Trash2 className="w-4 h-4" /></button>
-                                </div>
-                              ))}
+                              {safeVideos.map((videoItem, vIdx) => {
+                                // 💡 객체/문자열 구조 판별
+                                const srcStr = typeof videoItem === 'string' ? videoItem : videoItem.base64;
+                                return (
+                                  <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
+                                    <video src={srcStr} controls className="w-full h-full object-cover"></video>
+                                    {videoItem.isUploaded && (
+                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
+                                      </div>
+                                    )}
+                                    <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-10"><Trash2 className="w-4 h-4" /></button>
+                                  </div>
+                                )
+                              })}
                               {safeVideos.length < 4 && (
                                 <button 
                                   onClick={() => setVideoPopupProcessId(process.id)}
