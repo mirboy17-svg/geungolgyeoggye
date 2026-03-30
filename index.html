@@ -72,7 +72,8 @@
           lunchTimeStart: '',
           lunchTimeEnd: '',
           workTimeManual: '',
-          workInfo: '',
+          workInfo: '',        // 음성 요약 전용
+          workInfoManual: '',  // 직접 작성 전용 (새로 추가)
           workload: 0,
           frequency: 0,
           photos: [],
@@ -116,29 +117,31 @@
 
         // 💡 AI 대화 요약 (Gemini API) - '라이너 회의록 자동화' 스타일로 프롬프트 전면 개편
         const summarizeTextWithRetry = async (text, field, retries = 5) => {
-          const apiKey = ""; // API Key는 실행 환경에서 자동 주입됩니다.
+          // 🚨 [매우 중요] Vercel 배포 시 아래 쌍따옴표 안에 구글 Gemini API 키를 넣으셔야 AI가 작동합니다!
+          const apiKey = ""; 
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
           
           const fieldName = field === 'workContent' ? '작업내용' : '작업정보(취급 무게, 자세, 빈도 등)';
-          const prompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI(Liner 스타일)'입니다. 근로자와의 인터뷰 음성 텍스트를 분석하여, '${fieldName}' 항목에 맞게 구조화된 요약 보고서를 작성해 주세요.
-
-[회의록 요약 및 자동화 규칙]
-1. 불필요한 추임새('어', '음'), 인사말, 잡담 등은 100% 제거합니다.
-2. 인터뷰 내용을 단순히 줄글로 나열하지 않고, 카테고리별로 구조화(기호 '-' 활용)하여 가독성을 극대화합니다.
-3. 모든 문장은 객관적이고 명확한 보고서 어조(~함, ~임)로 변환합니다.
-4. 작업과 관련된 구체적인 수치(무게, 횟수, 시간)와 위험 요인(불편 호소, 불안정한 자세)을 정확히 포착하여 기재합니다.
-
-[출력 포맷: ${fieldName === '작업내용' ? '작업내용' : '작업정보'}에 맞게 자동 구성]
-${fieldName === '작업내용' ? `■ 핵심 요약\n- \n■ 세부 작업 순서\n- \n- ` : `■ 취급 중량 및 빈도\n- \n■ 주요 작업 자세\n- \n■ 특이/불편사항\n- `}
-
-[실제 인터뷰 대화 내용]
-${text}`;
           
+          // 🔥 AI에게 부여하는 엄격한 시스템 지시어
+          const systemPrompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI(Liner 스타일)'입니다. 
+근로자와의 인터뷰 음성을 분석하여 구조화된 요약 보고서를 작성해 주세요.
+
+[회의록 요약 및 자동화 엄격 규칙]
+1. '어', '그', '음', '막' 같은 추임새, 감탄사, 인사말, 감정적 호소(아프다, 힘들다), 잡담 등 쓸데없는 언어는 100% 삭제합니다.
+2. 답변을 구어체가 아닌, 객관적이고 건조한 보고서용 명사형 문장(~음, ~함)으로 변환합니다.
+3. 구체적인 수치(무게, 횟수, 시간)와 객관적 사실, 위험 요인(불편 부위, 불안정한 자세)만 정확히 포착합니다.
+4. 내용을 카테고리별로 구조화(기호 '-' 활용)하여 가독성을 높입니다.
+
+[출력 포맷: ${fieldName}에 맞게 구성]
+${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- ' : '■ 취급 중량 및 빈도\n- \n■ 주요 작업 자세 및 특이사항\n- '}`;
+
           const payload = { 
-            contents: [{ parts: [{ text: prompt }] }],
+            contents: [{ parts: [{ text: `[실제 인터뷰 대화 내용]\n${text}` }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             generationConfig: {
-              temperature: 0.1, // 창의성 제거 (빠른 연산 및 일관된 보고서체)
-              maxOutputTokens: 300 // 구조화된 회의록 출력을 위해 토큰 여유 확보 (150 -> 300)
+              temperature: 0.0, // 창의성을 완전히 제거하여 팩트 기반의 건조한 보고서체 유지
+              maxOutputTokens: 300 
             }
           };
           
@@ -469,6 +472,9 @@ ${text}`;
                   const processName = p.processName || `미지정_공정_${index + 1}`;
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
                   
+                  // 🔥 음성요약과 직접작성 내용을 깔끔하게 합쳐서 구글 시트로 보냅니다.
+                  const formattedWorkInfo = `[음성요약]\n${p.workInfo || '없음'}\n\n[직접작성]\n${p.workInfoManual || '없음'}`;
+                  
                   // 🔥 이미 "즉시 업로드" 되지 못한(오프라인 등) 사진/영상만 재전송 큐에 넣습니다.
                   (p.photos || []).forEach((photoItem, i) => {
                     if (typeof photoItem === 'string') {
@@ -492,7 +498,7 @@ ${text}`;
                       "공정명": processName,
                       "작업내용": p.workContent,
                       "작업시간": formattedWorkTime,
-                      "작업정보": p.workInfo,
+                      "작업정보": formattedWorkInfo, // 🔥 분리된 두 정보를 합쳐서 전송
                       "작업부하(A)": p.workload,
                       "작업빈도(B)": p.frequency,
                       "총점": p.workload * p.frequency
@@ -831,44 +837,70 @@ ${text}`;
                             </div>
                           </div>
 
-                          {/* 3. 작업정보 */}
+                          {/* 3. 작업정보 (음성요약과 직접작성 분리) */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
                                 <span className="text-blue-500">3.</span> 작업정보
                               </label>
-                              <div className="flex items-center gap-1.5">
-                                <button 
-                                  onClick={() => updateProcess(process.id, 'workInfo', '')}
-                                  className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" /> 삭제
-                                </button>
-                                <button 
-                                  onClick={() => toggleRecording(process.id, 'workInfo')}
-                                  disabled={isSummarizing && recordingField !== `${process.id}-workInfo`}
-                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all shadow-sm ${
-                                    recordingField === `${process.id}-workInfo` 
-                                      ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
-                                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
+                            </div>
+                            
+                            <div className="space-y-3">
+                              {/* 3-1. 음성 요약 영역 */}
+                              <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-bold text-blue-800">🎙️ AI 음성 요약</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <button 
+                                      onClick={() => updateProcess(process.id, 'workInfo', '')}
+                                      className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[10px] font-bold bg-white text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
+                                    >
+                                      <Trash2 className="w-3 h-3" /> 삭제
+                                    </button>
+                                    <button 
+                                      onClick={() => toggleRecording(process.id, 'workInfo')}
+                                      disabled={isSummarizing && recordingField !== `${process.id}-workInfo`}
+                                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all shadow-sm ${
+                                        recordingField === `${process.id}-workInfo` 
+                                          ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse ring-2 ring-red-200' 
+                                          : 'bg-blue-600 text-white border border-blue-700 hover:bg-blue-700 active:scale-95'
+                                      }`}
+                                    >
+                                      {recordingField === `${process.id}-workInfo` ? (
+                                        <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
+                                      ) : (
+                                        <><Mic className="w-3.5 h-3.5 text-white" /> 음성 요약</>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                                <textarea 
+                                  rows="3" placeholder="마이크를 눌러 대화를 요약하면 이곳에 정리됩니다."
+                                  className={`w-full p-2.5 bg-white border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
+                                    recordingField === `${process.id}-workInfo` ? 'border-red-300 bg-red-50' : 'border-blue-200'
                                   }`}
-                                >
-                                  {recordingField === `${process.id}-workInfo` ? (
-                                    <><div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div> 녹음 종료</>
-                                  ) : (
-                                    <><Mic className="w-3.5 h-3.5 text-blue-500" /> 음성 요약</>
-                                  )}
-                                </button>
+                                  value={process.workInfo} onChange={(e) => updateProcess(process.id, 'workInfo', e.target.value)}
+                                />
+                              </div>
+
+                              {/* 3-2. 직접 작성 영역 */}
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-bold text-slate-700">✍️ 직접 작성 (추가 정보)</span>
+                                  <button 
+                                      onClick={() => updateProcess(process.id, 'workInfoManual', '')}
+                                      className="flex items-center gap-1 px-2 py-1.5 rounded-full text-[10px] font-bold bg-white text-slate-500 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm border border-slate-200"
+                                    >
+                                      <Trash2 className="w-3 h-3" /> 삭제
+                                  </button>
+                                </div>
+                                <textarea 
+                                  rows="2" placeholder="취급 무게, 작업 자세 등 상세 정보를 직접 타이핑하세요."
+                                  className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                                  value={process.workInfoManual || ''} onChange={(e) => updateProcess(process.id, 'workInfoManual', e.target.value)}
+                                />
                               </div>
                             </div>
-                            {/* 내용이 길어지므로 rows를 2에서 4로 변경 */}
-                            <textarea 
-                              rows="4" placeholder="취급 무게, 작업 자세 등 상세 정보를 직접 입력하거나 마이크로 회의록 요약하세요."
-                              className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
-                                recordingField === `${process.id}-workInfo` ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
-                              }`}
-                              value={process.workInfo} onChange={(e) => updateProcess(process.id, 'workInfo', e.target.value)}
-                            />
                           </div>
 
                           {/* 4. 작업부하 및 빈도 */}
