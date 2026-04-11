@@ -169,6 +169,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
         // --- 메인 앱 ---
         function MobileApp() {
           const [companyName, setCompanyName] = useState('');
+          const [category, setCategory] = useState(''); // 🔥 추가된 대분류(성씨) 선택 State
           const [processes, setProcesses] = useState([emptyProcess()]);
           const [toastMessage, setToastMessage] = useState('');
           const [isSyncing, setIsSyncing] = useState(false); // 전체 동기화 화면
@@ -195,6 +196,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             try {
               const savedCompany = localStorage.getItem('localCompanyName');
               if (savedCompany) setCompanyName(savedCompany);
+
+              const savedCategory = localStorage.getItem('localCategory'); // 🔥 기기에서 성씨 불러오기
+              if (savedCategory) setCategory(savedCategory);
 
               const savedData = localStorage.getItem('localProcessData');
               if (savedData) {
@@ -387,7 +391,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               const currentProcess = processes.find(p => p.id === processId);
               const pName = currentProcess?.processName || '미지정공정';
               const fileExt = type === 'photo' ? 'jpg' : 'mp4';
-              const fileName = `${companyName || '미지정사업체'}_${pName}_${type === 'photo' ? '사진' : '동영상'}_${Date.now()}.${fileExt}`;
+              
+              // 🔥 선택된 대분류(성씨)와 인덱스를 포함하여 파일명 형식 지정: (정)단위사업체명_공정명1
+              const catPrefix = category ? `(${category})` : '';
+              const mediaCount = type === 'photo' ? (currentProcess.photos?.length || 0) : (currentProcess.videos?.length || 0);
+              const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}${mediaCount + 1}.${fileExt}`;
 
               if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
                  throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
@@ -450,6 +458,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             localStorage.setItem('localCompanyName', companyName);
+            localStorage.setItem('localCategory', category); // 🔥 성씨 자동 저장
             if (isAutoSave) {
               setToastMessage('📱 기기 내부 임시 저장 완료');
               return;
@@ -469,11 +478,13 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
 
-              // 텍스트 데이터 세팅
+              // 🔥 텍스트 데이터 세팅 시 시트명과 파일명에도 성씨 접두사 적용
+              const catPrefix = category ? `(${category})` : '';
+              
               const spreadsheetPayload = {
                 type: 'spreadsheet',
                 folderId: TARGET_FOLDER_ID,
-                spreadsheetName: companyName || '미지정사업체',
+                spreadsheetName: `${catPrefix}${companyName || '미지정사업체'}`,
                 processes: data.map((p, index) => {
                   const processName = p.processName || `미지정_공정_${index + 1}`;
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
@@ -494,23 +505,23 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
                   // 3) 수공구 포맷팅
                   const validHandTools = p.handTools?.filter(item => item.weight || item.count);
-                  const strHandTools = validHandTools?.length > 0 
-                    ? validHandTools.map((item, i) => `${i+1}. 무게: ${item.weight||'미선택'}, 취급횟수: ${item.count||'미입력'}`).join('\n')
-                    : '해당없음';
+                  const formattedWorkInfo = `[음성요약]\n${p.workInfo || '없음'}\n\n${formattedManual.trim()}`;
                   
-                  // 🔥 이미 "즉시 업로드" 되지 못한(오프라인 등) 사진/영상만 재전송 큐에 넣습니다.
+                  // 🔥 이미 "즉시 업로드" 되지 못한(오프라인 등) 사진/영상만 재전송 큐에 넣습니다. (파일명 규칙 적용)
                   (p.photos || []).forEach((photoItem, i) => {
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${i + 1}.jpg`;
                     if (typeof photoItem === 'string') {
-                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: photoItem });
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem });
                     } else if (photoItem && !photoItem.isUploaded) {
-                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_사진_${i + 1}.jpg`, fileData: photoItem.base64 });
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem.base64 });
                     }
                   });
                   (p.videos || []).forEach((videoItem, i) => {
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${i + 1}.mp4`;
                      if (typeof videoItem === 'string') {
-                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: videoItem });
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem });
                     } else if (videoItem && !videoItem.isUploaded) {
-                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: `${processName}_동영상_${i + 1}.mp4`, fileData: videoItem.base64 });
+                      mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem.base64 });
                     }
                   });
 
@@ -614,7 +625,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
               localStorage.removeItem('localCompanyName');
+              localStorage.removeItem('localCategory'); // 🔥 초기화 시 삭제
               setCompanyName('');
+              setCategory('');
               setProcesses([emptyProcess()]);
               setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
             }
@@ -773,13 +786,26 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     <label className="block text-sm font-bold text-slate-800 mb-2">
                       <span className="text-blue-600">■</span> 단위사업체 명 (대분류)
                     </label>
-                    <input 
-                      type="text" 
-                      placeholder="예: 현대자동차 울산공장" 
-                      className="w-full p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 font-bold"
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                    />
+                    {/* 🔥 단위사업체 입력칸을 드롭다운과 텍스트 입력칸으로 분할 */}
+                    <div className="flex gap-2">
+                      <select 
+                        className="p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 font-bold w-[76px] shrink-0 text-center text-slate-700"
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                      >
+                        <option value="">선택</option>
+                        {['정', '이', '박', '김', '조', '안', '윤', '강', '서'].map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="text" 
+                        placeholder="예: 현대자동차 울산공장" 
+                        className="flex-1 p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 font-bold min-w-0"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {processes.map((process, index) => {
@@ -806,11 +832,43 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 작업내용 */}
+                          {/* 1. 현장 사진 첨부 (위로 이동됨) */}
                           <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">1.</span> 현장 사진 첨부</label>
+                              <span className="text-xs text-slate-400 font-medium">{safePhotos.length}장 / 최대 10장</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              {safePhotos.map((photoItem, pIdx) => {
+                                // 💡 문자열(구버전)인지 객체(즉시업로드된 신버전)인지 구분하여 렌더링
+                                const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
+                                return (
+                                  <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                                    <img src={srcStr} className="w-full h-full object-cover" />
+                                    {photoItem.isUploaded && (
+                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1">
+                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
+                                      </div>
+                                    )}
+                                    <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
+                                  </div>
+                                )
+                              })}
+                              {safePhotos.length < 10 && (
+                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                  <Camera className="w-8 h-8 mb-2" />
+                                  <span className="text-xs font-medium text-center">사진 촬영<br/>(자동 압축됨)</span>
+                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'photo')} />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 2. 작업내용 */}
+                          <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                <span className="text-blue-500">1.</span> 작업내용
+                                <span className="text-blue-500">2.</span> 작업내용
                               </label>
                               <div className="flex items-center gap-1.5">
                                 <button 
@@ -846,10 +904,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             />
                           </div>
 
-                          {/* 2. 작업시간 (칩 UI) */}
+                          {/* 3. 작업시간 (칩 UI) */}
                           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
                             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
-                              <span className="text-blue-500">2.</span> 작업시간
+                              <span className="text-blue-500">3.</span> 작업시간
                             </label>
                             
                             <div>
@@ -896,11 +954,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 3. 작업정보 (음성요약과 직접작성 분리) */}
+                          {/* 4. 작업정보 (음성요약과 직접작성 분리) */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                <span className="text-blue-500">3.</span> 작업정보
+                                <span className="text-blue-500">4.</span> 작업정보
                               </label>
                             </div>
                             
@@ -1069,10 +1127,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 4. 작업부하 및 빈도 */}
+                          {/* 5. 작업부하 및 빈도 */}
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center">
-                              <span className="text-blue-500 mr-1">4.</span> 작업부하 및 작업빈도
+                              <span className="text-blue-500 mr-1">5.</span> 작업부하 및 작업빈도
                             </label>
 
                             <div className="flex gap-2 items-stretch">
@@ -1111,38 +1169,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                 </div>
                                 <span className={`text-sm font-bold px-3 py-1.5 rounded-lg bg-white/60 shadow-sm ${scoreInfo.color}`}>{scoreInfo.text}</span>
                               </div>
-                            </div>
-                          </div>
-
-                          {/* 5. 사진 첨부 */}
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">5.</span> 현장 사진 첨부</label>
-                              <span className="text-xs text-slate-400 font-medium">{safePhotos.length}장 / 최대 10장</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              {safePhotos.map((photoItem, pIdx) => {
-                                // 💡 문자열(구버전)인지 객체(즉시업로드된 신버전)인지 구분하여 렌더링
-                                const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
-                                return (
-                                  <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
-                                    <img src={srcStr} className="w-full h-full object-cover" />
-                                    {photoItem.isUploaded && (
-                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1">
-                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
-                                      </div>
-                                    )}
-                                    <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
-                                  </div>
-                                )
-                              })}
-                              {safePhotos.length < 10 && (
-                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
-                                  <Camera className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-medium text-center">사진 촬영<br/>(자동 압축됨)</span>
-                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'photo')} />
-                                </label>
-                              )}
                             </div>
                           </div>
 
