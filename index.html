@@ -670,9 +670,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 if(window.confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
                   localStorage.removeItem('localProcessData');
                   localStorage.removeItem('localCompanyName');
-                  localStorage.removeItem('localCategory'); 
+                  // 🔥 성씨(대분류)는 계속 유지되도록 localStorage에서 지우지 않음
                   setCompanyName('');
-                  setCategory('');
+                  // setCategory(''); 🔥 State도 초기화하지 않고 그대로 유지
                   setIsCustomCompany(false);
                   setProcesses([emptyProcess()]);
                   setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
@@ -701,9 +701,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
               localStorage.removeItem('localCompanyName');
-              localStorage.removeItem('localCategory'); 
+              // 🔥 성씨(대분류)는 계속 유지되도록 localStorage에서 지우지 않음
               setCompanyName('');
-              setCategory('');
+              // setCategory(''); 🔥 State도 초기화하지 않고 그대로 유지
               setIsCustomCompany(false);
               setProcesses([emptyProcess()]);
               setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
@@ -717,8 +717,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           };
 
+          // 🔥 함수 연속 호출 시 씹히는 현상을 방지하기 위해 prev(이전 상태) 기반으로 업데이트
           const updateProcess = (id, field, value) => {
-            setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
+            setProcesses(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
           const updateNestedArray = (processId, fieldName, index, key, value) => {
@@ -890,10 +891,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                           }}
                         >
                           <option value="">단위사업체 선택 (시트 연동됨)</option>
+                          <option value="custom">✍️ 직접 입력...</option>
                           {fetchedCompanies.map((c, i) => (
                             <option key={i} value={c}>{c}</option>
                           ))}
-                          <option value="custom">직접 입력...</option>
                         </select>
 
                         {isCustomCompany && (
@@ -931,20 +932,22 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                 className="bg-transparent font-bold text-slate-800 focus:outline-none text-sm w-full truncate border-b border-slate-300/50 pb-1"
                                 value={process.isCustomProcess ? 'custom' : (availableProcesses.includes(process.processName) ? process.processName : (process.processName ? 'custom' : ''))}
                                 onChange={(e) => {
-                                  if (e.target.value === 'custom') {
-                                    updateProcess(process.id, 'isCustomProcess', true);
-                                    updateProcess(process.id, 'processName', '');
-                                  } else {
-                                    updateProcess(process.id, 'isCustomProcess', false);
-                                    updateProcess(process.id, 'processName', e.target.value);
-                                  }
+                                  // 🔥 직접 입력 선택 시 두 개의 값을 동시에 안전하게 업데이트합니다.
+                                  setProcesses(prev => prev.map(p => {
+                                    if (p.id === process.id) {
+                                      return e.target.value === 'custom'
+                                        ? { ...p, isCustomProcess: true, processName: '' }
+                                        : { ...p, isCustomProcess: false, processName: e.target.value };
+                                    }
+                                    return p;
+                                  }));
                                 }}
                               >
                                 <option value="">공정 선택</option>
+                                <option value="custom">✍️ 직접 입력...</option>
                                 {availableProcesses.map((p, i) => (
                                   <option key={i} value={p}>{p}</option>
                                 ))}
-                                <option value="custom">직접 입력...</option>
                               </select>
                               
                               {process.isCustomProcess && (
