@@ -867,7 +867,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                       <select 
                         className="p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 font-bold w-[76px] shrink-0 text-center text-slate-700"
                         value={category}
-                        onChange={(e) => setCategory(e.target.value)}
+                        onChange={(e) => {
+                          setCategory(e.target.value);
+                          localStorage.setItem('localCategory', e.target.value); // 🔥 선택하는 즉시 기기에 영구 저장 (절대 안 지워짐)
+                        }}
                       >
                         <option value="">선택</option>
                         {['정', '이', '박', '김', '조', '안', '윤', '강', '서'].map(c => (
