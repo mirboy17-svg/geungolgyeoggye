@@ -67,6 +67,7 @@
         const emptyProcess = () => ({
           id: 'proc_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
           processName: '',
+          isCustomProcess: false, // 🔥 공정명 직접입력 모드 여부
           workContent: '',
           workTimeStart: '',
           workTimeEnd: '',
@@ -169,12 +170,17 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
         // --- 메인 앱 ---
         function MobileApp() {
           const [companyName, setCompanyName] = useState('');
-          const [category, setCategory] = useState(''); // 🔥 추가된 대분류(성씨) 선택 State
+          const [isCustomCompany, setIsCustomCompany] = useState(false); // 🔥 단위사업체명 직접입력 모드
+          const [category, setCategory] = useState(''); 
           const [processes, setProcesses] = useState([emptyProcess()]);
           const [toastMessage, setToastMessage] = useState('');
-          const [isSyncing, setIsSyncing] = useState(false); // 전체 동기화 화면
+          const [isSyncing, setIsSyncing] = useState(false); 
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
+
+          // 💡 구글 시트에서 불러온 옵션 목록
+          const [fetchedCompanies, setFetchedCompanies] = useState([]);
+          const [fetchedProcessMap, setFetchedProcessMap] = useState({}); // { '사업장A': ['공정1', '공정2'] }
 
           // 💡 카메라 앱 선택 팝업용 State 추가
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
@@ -192,12 +198,80 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           // 🚀 [중요] 반드시 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
           const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyoy87S02bO4eUFmoH89AxFsxjNmWzCrDtnkI7ZPOBuBJNND0INUA489XOpvpILNK9J/exec'; 
 
+          // 🔥 1. 구글 스프레드시트 데이터 불러오기 로직 (CSV 파싱)
+          useEffect(() => {
+            const fetchSpreadsheetData = async () => {
+              try {
+                // 사용자가 요청한 구글 스프레드시트 아이디
+                const SHEET_ID = '1J9MkuVO5cCMhpEZFVZrOnNPMJf-quZlBpr6YzrgBfbo';
+                const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=0`;
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to fetch CSV');
+                const csvText = await response.text();
+
+                // CSV 파서 (따옴표 및 쉼표 구분 완벽 처리)
+                const rows = [];
+                let row = [];
+                let inQuotes = false;
+                let val = '';
+                for (let i = 0; i < csvText.length; i++) {
+                  const char = csvText[i];
+                  if (char === '"') {
+                    inQuotes = !inQuotes;
+                  } else if (char === ',' && !inQuotes) {
+                    row.push(val.trim());
+                    val = '';
+                  } else if (char === '\n' && !inQuotes) {
+                    row.push(val.trim());
+                    rows.push(row);
+                    row = [];
+                    val = '';
+                  } else {
+                    val += char;
+                  }
+                }
+                row.push(val.trim());
+                rows.push(row);
+
+                const companiesSet = new Set();
+                const pMap = {};
+
+                // 첫 줄(Header) 제외하고 데이터 추출 (A열: 단위사업체명, B열: 공정명 가정)
+                rows.forEach((r, idx) => {
+                  if (idx === 0) return; // Header 스킵
+                  const comp = r[0];
+                  const proc = r[1];
+                  if (comp) {
+                    companiesSet.add(comp);
+                    if (!pMap[comp]) pMap[comp] = [];
+                    if (proc && !pMap[comp].includes(proc)) {
+                      pMap[comp].push(proc);
+                    }
+                  }
+                });
+
+                setFetchedCompanies(Array.from(companiesSet));
+                setFetchedProcessMap(pMap);
+
+              } catch (error) {
+                console.error("스프레드시트 데이터 불러오기 실패:", error);
+                // 권한이 없거나 네트워크 에러 시 조용히 패스 (직접 입력 사용)
+              }
+            };
+            
+            fetchSpreadsheetData();
+          }, []);
+
+          // 2. 초기 로컬 스토리지 불러오기
           useEffect(() => {
             try {
               const savedCompany = localStorage.getItem('localCompanyName');
-              if (savedCompany) setCompanyName(savedCompany);
+              if (savedCompany) {
+                setCompanyName(savedCompany);
+              }
 
-              const savedCategory = localStorage.getItem('localCategory'); // 🔥 기기에서 성씨 불러오기
+              const savedCategory = localStorage.getItem('localCategory'); 
               if (savedCategory) setCategory(savedCategory);
 
               const savedData = localStorage.getItem('localProcessData');
@@ -218,6 +292,13 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               localStorage.removeItem('localProcessData');
             }
           }, []);
+
+          // 3. 업체 리스트가 로드되었을 때, 기존 저장된 값이 리스트에 없다면 자동으로 '직접입력' 모드로 전환
+          useEffect(() => {
+            if (companyName && fetchedCompanies.length > 0 && !fetchedCompanies.includes(companyName)) {
+              setIsCustomCompany(true);
+            }
+          }, [companyName, fetchedCompanies]);
 
           useEffect(() => {
             if (toastMessage && !isSyncing && !isSummarizing && !recordingField) {
@@ -372,7 +453,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               percentage: 20 
             });
 
-            let base64Data = null; // 🔥 ReferenceError 수정을 위해 변수를 try 블록 바깥으로 이동합니다.
+            let base64Data = null; 
 
             try {
               if (type === 'photo') {
@@ -392,7 +473,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               const pName = currentProcess?.processName || '미지정공정';
               const fileExt = type === 'photo' ? 'jpg' : 'mp4';
               
-              // 🔥 선택된 대분류(성씨)와 인덱스를 포함하여 파일명 형식 지정: (정)단위사업체명_공정명1
               const catPrefix = category ? `(${category})` : '';
               const mediaCount = type === 'photo' ? (currentProcess.photos?.length || 0) : (currentProcess.videos?.length || 0);
               const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}${mediaCount + 1}.${fileExt}`;
@@ -419,8 +499,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               setUploadProgress({ current: 1, total: 1, text: `✅ 업로드 완료!`, percentage: 100 });
 
-              // 완료되면 상태에 기록 (이미 업로드 되었으므로 isUploaded: true 부여)
-              // 이후 최종저장 시 이 파일은 재업로드하지 않습니다.
               const mediaObj = { isUploaded: true, base64: base64Data, fileName: fileName };
               
               setProcesses(processes.map(p => {
@@ -438,7 +516,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               console.error(error);
               alert("🚨 즉시 전송 실패: " + error.message + "\n\n오프라인 모드로 휴대폰에 임시 저장합니다. (나중에 최종저장 시 함께 전송됩니다.)");
               
-              // 실패 시 기존처럼 객체 형태가 아닌 일반 문자열(base64)로 저장하여 최종저장 때 다시 시도하도록 함
               if (base64Data) {
                 setProcesses(processes.map(p => {
                     if (p.id === processId) {
@@ -454,11 +531,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             e.target.value = null; // 인풋 초기화
           };
 
-          // 🚀 최종 텍스트 데이터 전송 (이미 전송된 동영상은 패스하여 1초 만에 끝남)
+          // 🚀 최종 텍스트 데이터 전송
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             localStorage.setItem('localCompanyName', companyName);
-            localStorage.setItem('localCategory', category); // 🔥 성씨 자동 저장
+            localStorage.setItem('localCategory', category); 
             if (isAutoSave) {
               setToastMessage('📱 기기 내부 임시 저장 완료');
               return;
@@ -478,7 +555,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
 
-              // 🔥 텍스트 데이터 세팅 시 시트명과 파일명에도 성씨 접두사 적용
               const catPrefix = category ? `(${category})` : '';
               
               const spreadsheetPayload = {
@@ -488,8 +564,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 processes: data.map((p, index) => {
                   const processName = p.processName || `미지정_공정_${index + 1}`;
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
-                  
-                  // 🔥 항목별로 데이터를 개별적으로 분리하여 포맷팅합니다.
                   
                   // 1) 작업량 포맷팅
                   const validWorkloads = p.workloads?.filter(item => item.count || item.duration);
@@ -505,9 +579,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
                   // 3) 수공구 포맷팅
                   const validHandTools = p.handTools?.filter(item => item.weight || item.count);
-                  const formattedWorkInfo = `[음성요약]\n${p.workInfo || '없음'}\n\n${formattedManual.trim()}`;
+                  const strHandTools = validHandTools?.length > 0 
+                    ? validHandTools.map((item, i) => `${i+1}. 무게: ${item.weight||'미선택'}, 취급횟수: ${item.count||'미입력'}`).join('\n')
+                    : '해당없음';
                   
-                  // 🔥 이미 "즉시 업로드" 되지 못한(오프라인 등) 사진/영상만 재전송 큐에 넣습니다. (파일명 규칙 적용)
                   (p.photos || []).forEach((photoItem, i) => {
                     const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${i + 1}.jpg`;
                     if (typeof photoItem === 'string') {
@@ -553,7 +628,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 setUploadProgress({ current: completedTasks, total: totalTasks, text, percentage });
               };
 
-              // 대부분의 경우 여기서 끝납니다 (1건 - 스프레드시트 텍스트)
               updateProgress('☁️ 조사표 텍스트 데이터를 전송 중...');
               
               let response = await fetch(fetchUrl, {
@@ -566,7 +640,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               completedTasks++;
               
-              // 만약 이전에 통신 실패로 못 보낸 파일이 있다면 여기서 다시 시도합니다.
               if (mediaQueue.length > 0) {
                 updateProgress('☁️ 미전송 미디어 파일 동기화 중...');
                 const totalMedia = mediaQueue.length;
@@ -597,9 +670,12 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 if(window.confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
                   localStorage.removeItem('localProcessData');
                   localStorage.removeItem('localCompanyName');
+                  localStorage.removeItem('localCategory'); 
                   setCompanyName('');
+                  setCategory('');
+                  setIsCustomCompany(false);
                   setProcesses([emptyProcess()]);
-                  setToastMessage('✨ 화면이 초기화되었습니다. 새 조사를 시작하세요.');
+                  setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
                 } else {
                   setToastMessage('✅ 모든 데이터 전송 완료!');
                 }
@@ -625,9 +701,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
               localStorage.removeItem('localCompanyName');
-              localStorage.removeItem('localCategory'); // 🔥 초기화 시 삭제
+              localStorage.removeItem('localCategory'); 
               setCompanyName('');
               setCategory('');
+              setIsCustomCompany(false);
               setProcesses([emptyProcess()]);
               setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
             }
@@ -644,7 +721,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
 
-          // 💡 중첩 배열(작업량, 중량물, 수공구) 조작을 위한 헬퍼 함수들
           const updateNestedArray = (processId, fieldName, index, key, value) => {
             setProcesses(processes.map(p => {
               if (p.id === processId) {
@@ -786,7 +862,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     <label className="block text-sm font-bold text-slate-800 mb-2">
                       <span className="text-blue-600">■</span> 단위사업체 명 (대분류)
                     </label>
-                    {/* 🔥 단위사업체 입력칸을 드롭다운과 텍스트 입력칸으로 분할 */}
                     <div className="flex gap-2">
                       <select 
                         className="p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 font-bold w-[76px] shrink-0 text-center text-slate-700"
@@ -798,13 +873,39 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
-                      <input 
-                        type="text" 
-                        placeholder="예: 현대자동차 울산공장" 
-                        className="flex-1 p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 font-bold min-w-0"
-                        value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
-                      />
+                      
+                      {/* 🔥 연동된 단위사업체 드롭다운 & 직접입력 분기 */}
+                      <div className="flex-1 flex flex-col gap-2 min-w-0">
+                        <select 
+                          className="w-full p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 font-bold text-slate-700 truncate"
+                          value={isCustomCompany ? 'custom' : (fetchedCompanies.includes(companyName) ? companyName : (companyName ? 'custom' : ''))}
+                          onChange={(e) => {
+                            if (e.target.value === 'custom') {
+                              setIsCustomCompany(true);
+                              setCompanyName('');
+                            } else {
+                              setIsCustomCompany(false);
+                              setCompanyName(e.target.value);
+                            }
+                          }}
+                        >
+                          <option value="">단위사업체 선택 (시트 연동됨)</option>
+                          {fetchedCompanies.map((c, i) => (
+                            <option key={i} value={c}>{c}</option>
+                          ))}
+                          <option value="custom">직접 입력...</option>
+                        </select>
+
+                        {isCustomCompany && (
+                          <input 
+                            type="text" 
+                            placeholder="예: 현대자동차 울산공장" 
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 font-bold shadow-sm"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
+                          />
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -814,25 +915,54 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     const safePhotos = process.photos || [];
                     const safeVideos = process.videos || [];
 
+                    // 현재 선택된 사업체에 해당하는 공정 목록 필터링
+                    const availableProcesses = fetchedProcessMap[companyName] || [];
+
                     return (
                       <div key={process.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                         {/* 공정 헤더 */}
                         <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                           <div className="flex items-center gap-2">
-                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">{index + 1}</span>
-                            <input 
-                              type="text" 
-                              placeholder="공정명 (예: 조립 1라인)" 
-                              className="bg-transparent border-none font-bold text-slate-800 focus:outline-none focus:ring-0 p-0 placeholder-slate-400 w-48"
-                              value={process.processName}
-                              onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
-                            />
+                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0">{index + 1}</span>
+                            
+                            {/* 🔥 공정명 드롭다운 & 직접입력 */}
+                            <div className="flex flex-col gap-1.5 w-48">
+                              <select 
+                                className="bg-transparent font-bold text-slate-800 focus:outline-none text-sm w-full truncate border-b border-slate-300/50 pb-1"
+                                value={process.isCustomProcess ? 'custom' : (availableProcesses.includes(process.processName) ? process.processName : (process.processName ? 'custom' : ''))}
+                                onChange={(e) => {
+                                  if (e.target.value === 'custom') {
+                                    updateProcess(process.id, 'isCustomProcess', true);
+                                    updateProcess(process.id, 'processName', '');
+                                  } else {
+                                    updateProcess(process.id, 'isCustomProcess', false);
+                                    updateProcess(process.id, 'processName', e.target.value);
+                                  }
+                                }}
+                              >
+                                <option value="">공정 선택</option>
+                                {availableProcesses.map((p, i) => (
+                                  <option key={i} value={p}>{p}</option>
+                                ))}
+                                <option value="custom">직접 입력...</option>
+                              </select>
+                              
+                              {process.isCustomProcess && (
+                                <input 
+                                  type="text" 
+                                  placeholder="공정명 직접 입력" 
+                                  className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-800 focus:outline-blue-500 w-full shadow-sm"
+                                  value={process.processName}
+                                  onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
+                                />
+                              )}
+                            </div>
                           </div>
                           <button onClick={() => removeProcess(process.id)} className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"><Trash2 className="w-5 h-5" /></button>
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 현장 사진 첨부 (위로 이동됨) */}
+                          {/* 1. 현장 사진 첨부 */}
                           <div>
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">1.</span> 현장 사진 첨부</label>
@@ -840,7 +970,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               {safePhotos.map((photoItem, pIdx) => {
-                                // 💡 문자열(구버전)인지 객체(즉시업로드된 신버전)인지 구분하여 렌더링
                                 const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
                                 return (
                                   <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
@@ -894,7 +1023,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                 </button>
                               </div>
                             </div>
-                            {/* 내용이 길어지므로 rows를 2에서 4로 변경 */}
                             <textarea 
                               rows="4" placeholder="주요 작업 내용을 직접 입력하거나, 우측의 마이크를 눌러 회의록을 자동 요약하세요."
                               className={`w-full p-2.5 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors ${
@@ -963,7 +1091,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             
                             <div className="space-y-4">
-                              {/* 3-1. 음성 요약 영역 */}
+                              {/* 4-1. 음성 요약 영역 */}
                               <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
                                 <div className="flex items-center justify-between mb-2">
                                   <span className="text-xs font-bold text-blue-800">🎙️ AI 음성 요약</span>
@@ -1000,7 +1128,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                 />
                               </div>
 
-                              {/* 3-2. 직접 작성 영역 (세분화 됨) */}
+                              {/* 4-2. 직접 작성 영역 (세분화 됨) */}
                               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-4">
                                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                                   <span className="text-xs font-bold text-slate-700">✍️ 직접 작성 (상세 분류)</span>
