@@ -446,9 +446,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               return;
             }
 
-            // 🔥 1. 통신 타이밍 충돌 원천 차단: 카메라 종료 후 운영체제가 숨 고를 시간 1초(1000ms) 강제 대기
+            // 🔥 1. 통신 타이밍 충돌 원천 차단: 카메라 종료 후 운영체제가 숨 고를 시간 강제 대기 (최소화: 300ms)
             setToastMessage(`⏳ ${type === 'photo' ? '사진' : '동영상'} 처리 준비 중... (화면을 유지해주세요)`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 300));
 
             setIsSyncing(true);
             setUploadProgress({ 
@@ -643,22 +643,29 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               
               if (mediaQueue.length > 0) {
                 updateProgress('☁️ 미전송 미디어 파일 동기화 중...');
-                const totalMedia = mediaQueue.length;
-                for (let i = 0; i < totalMedia; i++) {
-                  const mediaItem = mediaQueue[i];
-                  updateProgress(`미전송 파일 재업로드 중 (${i + 1}/${totalMedia})`);
-                  
-                  response = await fetch(fetchUrl, {
+                
+                // 🔥 [속도 최적화] 하나씩 순서대로 올리던 방식에서 -> 여러 개를 동시에 한꺼번에 쏘는 방식(병렬 처리)으로 변경
+                const uploadPromises = mediaQueue.map(async (mediaItem) => {
+                  const mediaResponse = await fetch(fetchUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(mediaItem)
                   });
-                  result = await response.json();
-                  if (result.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
+                  const mediaResult = await mediaResponse.json();
+                  if (mediaResult.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
                   
                   completedTasks++;
-                  updateProgress(`업로드 완료 (${i + 1}/${totalMedia})`);
-                }
+                  const percentage = Math.round((completedTasks / totalTasks) * 100);
+                  setUploadProgress({ 
+                    current: completedTasks, 
+                    total: totalTasks, 
+                    text: `업로드 진행 중... (${completedTasks}/${totalTasks})`, 
+                    percentage 
+                  });
+                });
+
+                // 모든 파일이 동시에 전송 완료될 때까지 대기
+                await Promise.all(uploadPromises);
               }
               
               completedTasks = totalTasks;
