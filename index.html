@@ -67,24 +67,25 @@
         const emptyProcess = () => ({
           id: 'proc_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
           processName: '',
-          isCustomProcess: false, // 🔥 공정명 직접입력 모드 여부
+          isCustomProcess: false, 
           workContent: '',
           workTimeStart: '',
           workTimeEnd: '',
           lunchTimeStart: '',
           lunchTimeEnd: '',
           workTimeManual: '',
-          workInfo: '',        // 음성 요약 전용
-          workInfoManual: '',  // 직접 작성 전용 (추가 정보)
-          workloads: [{ count: '', duration: '' }],           // 1) 작업량
-          heavyObjects: [{ weight: '', count: '' }],          // 2) 중량물
-          handTools: [{ weight: '', count: '' }],             // 3) 수공구
+          workInfo: '',        
+          workInfoManual: '',  
+          workloads: [{ count: '', duration: '' }],           
+          heavyObjects: [{ weight: '', count: '' }],          
+          handTools: [{ weight: '', count: '' }],             
           workload: 0,
           frequency: 0,
           photos: [],
           videos: []
         });
 
+        // 💡 [OOM 방지] 캔버스 및 이미지 메모리 누수 강제 차단 압축 로직
         const compressImage = (file) => {
           return new Promise((resolve) => {
             const reader = new FileReader();
@@ -100,35 +101,35 @@
                 let height = img.height;
 
                 if (width > height) {
-                  if (width > MAX_WIDTH) {
-                    height *= MAX_WIDTH / width;
-                    width = MAX_WIDTH;
-                  }
+                  if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
                 } else {
-                  if (height > MAX_HEIGHT) {
-                    width *= MAX_HEIGHT / height;
-                    height = MAX_HEIGHT;
-                  }
+                  if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
                 }
+                
                 canvas.width = width;
                 canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL('image/jpeg', 0.5));
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+
+                // 🔥 OOM(메모리 부족) 방지를 위한 캔버스 및 이미지 객체 강제 초기화
+                canvas.width = 0;
+                canvas.height = 0;
+                img.src = '';
+                
+                resolve(dataUrl);
               };
             };
           });
         };
 
-        // 💡 AI 대화 요약 (Gemini API) - '라이너 회의록 자동화' 스타일로 프롬프트 전면 개편
+        // 💡 AI 대화 요약 (Gemini API)
         const summarizeTextWithRetry = async (text, field, retries = 5) => {
-          // 🚨 [매우 중요] Vercel 배포 시 아래 쌍따옴표 안에 구글 Gemini API 키를 넣으셔야 AI가 작동합니다!
           const apiKey = ""; 
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
           
           const fieldName = field === 'workContent' ? '작업내용' : '작업정보(취급 무게, 자세, 빈도 등)';
           
-          // 🔥 AI에게 부여하는 엄격한 시스템 지시어
           const systemPrompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI(Liner 스타일)'입니다. 
 근로자와의 인터뷰 음성을 분석하여 구조화된 요약 보고서를 작성해 주세요.
 
@@ -145,7 +146,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             contents: [{ parts: [{ text: `[실제 인터뷰 대화 내용]\n${text}` }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
             generationConfig: {
-              temperature: 0.0, // 창의성을 완전히 제거하여 팩트 기반의 건조한 보고서체 유지
+              temperature: 0.0, 
               maxOutputTokens: 300 
             }
           };
@@ -170,7 +171,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
         // --- 메인 앱 ---
         function MobileApp() {
           const [companyName, setCompanyName] = useState('');
-          const [isCustomCompany, setIsCustomCompany] = useState(false); // 🔥 단위사업체명 직접입력 모드
+          const [isCustomCompany, setIsCustomCompany] = useState(false); 
           const [category, setCategory] = useState(''); 
           const [processes, setProcesses] = useState([emptyProcess()]);
           const [toastMessage, setToastMessage] = useState('');
@@ -178,14 +179,15 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
-          // 💡 구글 시트에서 불러온 옵션 목록
+          // 💡 구글 시트 옵션
           const [fetchedCompanies, setFetchedCompanies] = useState([]);
-          const [fetchedProcessMap, setFetchedProcessMap] = useState({}); // { '사업장A': ['공정1', '공정2'] }
+          const [fetchedProcessMap, setFetchedProcessMap] = useState({}); 
 
-          // 💡 카메라 앱 선택 팝업용 State 추가
+          // 💡 모달 State
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
+          const [photoPopupProcessId, setPhotoPopupProcessId] = useState(null); 
 
-          // 💡 음성 인식 및 요약 관련 State
+          // 💡 음성 인식 State
           const [recordingField, setRecordingField] = useState(null); 
           const [isSummarizing, setIsSummarizing] = useState(false);
           const recognitionRef = useRef(null);
@@ -195,14 +197,12 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           const recordingTimerRef = useRef(null); 
 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
-          // 🚀 [중요] 반드시 새로 배포한 '구글 웹 앱 URL'을 아래에 붙여넣으세요!
           const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyoy87S02bO4eUFmoH89AxFsxjNmWzCrDtnkI7ZPOBuBJNND0INUA489XOpvpILNK9J/exec'; 
 
-          // 🔥 1. 구글 스프레드시트 데이터 불러오기 로직 (CSV 파싱)
+          // 1. 구글 스프레드시트 데이터 불러오기 
           useEffect(() => {
             const fetchSpreadsheetData = async () => {
               try {
-                // 사용자가 요청한 구글 스프레드시트 아이디
                 const SHEET_ID = '1J9MkuVO5cCMhpEZFVZrOnNPMJf-quZlBpr6YzrgBfbo';
                 const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=0`;
                 
@@ -210,7 +210,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 if (!response.ok) throw new Error('Failed to fetch CSV');
                 const csvText = await response.text();
 
-                // CSV 파서 (따옴표 및 쉼표 구분 완벽 처리)
                 const rows = [];
                 let row = [];
                 let inQuotes = false;
@@ -237,9 +236,8 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 const companiesSet = new Set();
                 const pMap = {};
 
-                // 첫 줄(Header) 제외하고 데이터 추출 (A열: 단위사업체명, B열: 공정명 가정)
                 rows.forEach((r, idx) => {
-                  if (idx === 0) return; // Header 스킵
+                  if (idx === 0) return; 
                   const comp = r[0];
                   const proc = r[1];
                   if (comp) {
@@ -253,23 +251,18 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
                 setFetchedCompanies(Array.from(companiesSet));
                 setFetchedProcessMap(pMap);
-
-              } catch (error) {
-                console.error("스프레드시트 데이터 불러오기 실패:", error);
-                // 권한이 없거나 네트워크 에러 시 조용히 패스 (직접 입력 사용)
-              }
+              } catch (error) {}
             };
             
             fetchSpreadsheetData();
           }, []);
 
-          // 2. 초기 로컬 스토리지 불러오기
+          // 2. 초기 로컬 스토리지 불러오기 (최초 1회)
+          const isInitialMount = useRef(true);
           useEffect(() => {
             try {
               const savedCompany = localStorage.getItem('localCompanyName');
-              if (savedCompany) {
-                setCompanyName(savedCompany);
-              }
+              if (savedCompany) setCompanyName(savedCompany);
 
               const savedCategory = localStorage.getItem('localCategory'); 
               if (savedCategory) setCategory(savedCategory);
@@ -293,7 +286,17 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           }, []);
 
-          // 3. 업체 리스트가 로드되었을 때, 기존 저장된 값이 리스트에 없다면 자동으로 '직접입력' 모드로 전환
+          // 💡 3. [백그라운드 킬 강제 차단] - 글자 입력 등 상태가 바뀔 때마다 실시간 영구 자동저장
+          useEffect(() => {
+            if (isInitialMount.current) {
+              isInitialMount.current = false;
+              return; // 첫 로드 시 빈 데이터로 덮어씌워지는 것 방지
+            }
+            if (processes.length > 0) {
+              localStorage.setItem('localProcessData', JSON.stringify(processes));
+            }
+          }, [processes]);
+
           useEffect(() => {
             if (companyName && fetchedCompanies.length > 0 && !fetchedCompanies.includes(companyName)) {
               setIsCustomCompany(true);
@@ -307,7 +310,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           }, [toastMessage, isSyncing, isSummarizing, recordingField]);
 
-          // 즉시 요약 실행 함수
+          // 음성 요약 실행
           const executeSummary = async (textToSummarize, processId, field) => {
             if (textToSummarize.length === 0) {
               setToastMessage('⚠️ 입력된 음성이 없습니다.');
@@ -340,7 +343,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           };
 
-          // 수동 종료 방식 음성인식
           const toggleRecording = async (processId, field) => {
             const fieldKey = `${processId}-${field}`;
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -432,12 +434,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           };
 
-          // 🚀 [신규 기능] 사진/동영상 첨부 시 구글 드라이브 즉시 업로드 처리
-          const handleMediaCapture = async (e, processId, type) => {
+          // 🚀 💡 [통신 타이밍 충돌 방지] 안전한 자동 전송 로직 (다시 원상복구 및 강화)
+          const handleMediaCaptureSafeAuto = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            // 파일 용량 제한 (동영상 30MB)
             const maxSizeMB = type === 'photo' ? 10 : 30; 
             if (file.size > maxSizeMB * 1024 * 1024) {
               alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n\n해결방법: 카메라 설정에서 화질을 낮춰주세요.`);
@@ -445,11 +446,14 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               return;
             }
 
-            // 업로드 화면 강제 활성화 (Z-index 120 레벨로 가장 위에 띄움)
+            // 🔥 1. 통신 타이밍 충돌 원천 차단: 카메라 종료 후 운영체제가 숨 고를 시간 1초(1000ms) 강제 대기
+            setToastMessage(`⏳ ${type === 'photo' ? '사진' : '동영상'} 처리 준비 중... (화면을 유지해주세요)`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             setIsSyncing(true);
             setUploadProgress({ 
               current: 0, total: 1, 
-              text: `☁️ ${type === 'photo' ? '사진' : '동영상'}을 구글 서버로 바로 전송 중입니다... (창을 닫지 마세요)`, 
+              text: `☁️ 구글 서버로 자동 전송을 시작합니다...`, 
               percentage: 20 
             });
 
@@ -468,20 +472,19 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               setUploadProgress({ current: 0, total: 1, text: `☁️ 구글 드라이브에 저장 중...`, percentage: 60 });
 
-              // 공정명 파악 후 파일명 생성
               const currentProcess = processes.find(p => p.id === processId);
               const pName = currentProcess?.processName || '미지정공정';
               const fileExt = type === 'photo' ? 'jpg' : 'mp4';
               
               const catPrefix = category ? `(${category})` : '';
               const mediaCount = type === 'photo' ? (currentProcess.photos?.length || 0) : (currentProcess.videos?.length || 0);
-              const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}${mediaCount + 1}.${fileExt}`;
+              const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}_${type === 'photo'?'사진':'동영상'}${mediaCount + 1}.${fileExt}`;
 
               if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
                  throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
               }
 
-              // 구글 앱스 스크립트로 1건 즉시 전송
+              // 2. 구글 앱스 스크립트로 전송
               const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
               const response = await fetch(fetchUrl, {
                 method: 'POST',
@@ -501,7 +504,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               const mediaObj = { isUploaded: true, base64: base64Data, fileName: fileName };
               
-              setProcesses(processes.map(p => {
+              setProcesses(prev => prev.map(p => {
                   if (p.id === processId) {
                       return type === 'photo' 
                           ? { ...p, photos: [...(p.photos || []), mediaObj] }
@@ -514,14 +517,16 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
             } catch (error) {
               console.error(error);
-              alert("🚨 즉시 전송 실패: " + error.message + "\n\n오프라인 모드로 휴대폰에 임시 저장합니다. (나중에 최종저장 시 함께 전송됩니다.)");
+              alert("🚨 즉시 전송 실패: " + error.message + "\n\n통신이 불안정하여 기기에 임시 저장합니다. (최종 저장 시 다시 전송됩니다)");
               
               if (base64Data) {
-                setProcesses(processes.map(p => {
+                // 실패 시 로컬에 저장하여 최종 저장 버튼 누를 때 재시도하게 됨
+                const fallbackMediaObj = { isUploaded: false, base64: base64Data, fileName: `임시저장_${Date.now()}` };
+                setProcesses(prev => prev.map(p => {
                     if (p.id === processId) {
                         return type === 'photo' 
-                            ? { ...p, photos: [...(p.photos || []), base64Data] }
-                            : { ...p, videos: [...(p.videos || []), base64Data] };
+                            ? { ...p, photos: [...(p.photos || []), fallbackMediaObj] }
+                            : { ...p, videos: [...(p.videos || []), fallbackMediaObj] };
                     }
                     return p;
                 }));
@@ -554,7 +559,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               const timeStr = `${nowForName.getHours()}${nowForName.getMinutes()}${nowForName.getSeconds()}`;
 
               const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
-
               const catPrefix = category ? `(${category})` : '';
               
               const spreadsheetPayload = {
@@ -565,26 +569,23 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   const processName = p.processName || `미지정_공정_${index + 1}`;
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
                   
-                  // 1) 작업량 포맷팅
                   const validWorkloads = p.workloads?.filter(item => item.count || item.duration);
                   const strWorkloads = validWorkloads?.length > 0 
                     ? validWorkloads.map((item, i) => `${i+1}. 횟수: ${item.count||'미입력'}, 소요시간: ${item.duration||'미입력'}`).join('\n')
                     : '해당없음';
                   
-                  // 2) 중량물 포맷팅
                   const validHeavyObjects = p.heavyObjects?.filter(item => item.weight || item.count);
                   const strHeavyObjects = validHeavyObjects?.length > 0 
                     ? validHeavyObjects.map((item, i) => `${i+1}. 무게: ${item.weight||'미선택'}, 취급횟수: ${item.count||'미입력'}`).join('\n')
                     : '해당없음';
 
-                  // 3) 수공구 포맷팅
                   const validHandTools = p.handTools?.filter(item => item.weight || item.count);
                   const strHandTools = validHandTools?.length > 0 
                     ? validHandTools.map((item, i) => `${i+1}. 무게: ${item.weight||'미선택'}, 취급횟수: ${item.count||'미입력'}`).join('\n')
                     : '해당없음';
                   
                   (p.photos || []).forEach((photoItem, i) => {
-                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${i + 1}.jpg`;
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_사진${i + 1}.jpg`;
                     if (typeof photoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem });
                     } else if (photoItem && !photoItem.isUploaded) {
@@ -592,7 +593,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     }
                   });
                   (p.videos || []).forEach((videoItem, i) => {
-                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${i + 1}.mp4`;
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_동영상${i + 1}.mp4`;
                      if (typeof videoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem });
                     } else if (videoItem && !videoItem.isUploaded) {
@@ -645,7 +646,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 const totalMedia = mediaQueue.length;
                 for (let i = 0; i < totalMedia; i++) {
                   const mediaItem = mediaQueue[i];
-                  updateProgress(`재업로드 중 (${i + 1}/${totalMedia})`);
+                  updateProgress(`미전송 파일 재업로드 중 (${i + 1}/${totalMedia})`);
                   
                   response = await fetch(fetchUrl, {
                     method: 'POST',
@@ -670,9 +671,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 if(window.confirm("구글 드라이브에 안전하게 전송되었습니다.\n새로운 현장 조사를 위해 화면을 초기화할까요?")) {
                   localStorage.removeItem('localProcessData');
                   localStorage.removeItem('localCompanyName');
-                  // 🔥 성씨(대분류)는 계속 유지되도록 localStorage에서 지우지 않음
                   setCompanyName('');
-                  // setCategory(''); 🔥 State도 초기화하지 않고 그대로 유지
                   setIsCustomCompany(false);
                   setProcesses([emptyProcess()]);
                   setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
@@ -701,9 +700,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
               localStorage.removeItem('localProcessData');
               localStorage.removeItem('localCompanyName');
-              // 🔥 성씨(대분류)는 계속 유지되도록 localStorage에서 지우지 않음
               setCompanyName('');
-              // setCategory(''); 🔥 State도 초기화하지 않고 그대로 유지
               setIsCustomCompany(false);
               setProcesses([emptyProcess()]);
               setToastMessage('✨ 데이터가 초기화되었습니다. 새 조사를 시작하세요.');
@@ -717,7 +714,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           };
 
-          // 🔥 함수 연속 호출 시 씹히는 현상을 방지하기 위해 prev(이전 상태) 기반으로 업데이트
           const updateProcess = (id, field, value) => {
             setProcesses(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
           };
@@ -777,7 +773,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
               <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
                 
-                {/* 🚀 즉시 업로드 진행률 모달 (최상단 z-index 120) */}
                 {isSyncing && (
                   <div className="fixed inset-0 z-[120] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl p-6 w-full shadow-2xl flex flex-col items-center">
@@ -804,7 +799,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   </div>
                 )}
 
-                {/* Toast 알림창 */}
                 {toastMessage && !isSyncing && !isSummarizing && !recordingField && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
@@ -814,7 +808,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   </div>
                 )}
 
-                {/* App Header */}
                 <header className="bg-blue-600 text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <ChevronLeft className="w-6 h-6" />
@@ -849,7 +842,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   </div>
                 </header>
 
-                {/* Main Content */}
                 <main className="flex-1 overflow-y-auto p-4 pb-24 space-y-6">
                   <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-blue-100">
                     <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -858,7 +850,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     </div>
                   </div>
 
-                  {/* 단위사업체 (대분류) 최상단 고정 */}
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-300">
                     <label className="block text-sm font-bold text-slate-800 mb-2">
                       <span className="text-blue-600">■</span> 단위사업체 명 (대분류)
@@ -869,7 +860,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         value={category}
                         onChange={(e) => {
                           setCategory(e.target.value);
-                          localStorage.setItem('localCategory', e.target.value); // 🔥 선택하는 즉시 기기에 영구 저장 (절대 안 지워짐)
+                          localStorage.setItem('localCategory', e.target.value); 
                         }}
                       >
                         <option value="">선택</option>
@@ -878,7 +869,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         ))}
                       </select>
                       
-                      {/* 🔥 연동된 단위사업체 드롭다운 & 직접입력 분기 */}
                       <div className="flex-1 flex flex-col gap-2 min-w-0">
                         <select 
                           className="w-full p-3 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 font-bold text-slate-700 truncate"
@@ -918,24 +908,19 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     const scoreInfo = getScoreInfo(score);
                     const safePhotos = process.photos || [];
                     const safeVideos = process.videos || [];
-
-                    // 현재 선택된 사업체에 해당하는 공정 목록 필터링
                     const availableProcesses = fetchedProcessMap[companyName] || [];
 
                     return (
                       <div key={process.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        {/* 공정 헤더 */}
                         <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
                           <div className="flex items-center gap-2">
                             <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0">{index + 1}</span>
                             
-                            {/* 🔥 공정명 드롭다운 & 직접입력 */}
                             <div className="flex flex-col gap-1.5 w-48">
                               <select 
                                 className="bg-transparent font-bold text-slate-800 focus:outline-none text-sm w-full truncate border-b border-slate-300/50 pb-1"
                                 value={process.isCustomProcess ? 'custom' : (availableProcesses.includes(process.processName) ? process.processName : (process.processName ? 'custom' : ''))}
                                 onChange={(e) => {
-                                  // 🔥 직접 입력 선택 시 두 개의 값을 동시에 안전하게 업데이트합니다.
                                   setProcesses(prev => prev.map(p => {
                                     if (p.id === process.id) {
                                       return e.target.value === 'custom'
@@ -968,7 +953,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 현장 사진 첨부 */}
+                          {/* 1. 현장 사진 첨부 및 안전한 자동 등록 로직 */}
                           <div>
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">1.</span> 현장 사진 첨부</label>
@@ -977,29 +962,39 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             <div className="grid grid-cols-2 gap-3">
                               {safePhotos.map((photoItem, pIdx) => {
                                 const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
+                                const isUploaded = typeof photoItem === 'object' && photoItem.isUploaded;
+
                                 return (
-                                  <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                                  <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex flex-col group">
                                     <img src={srcStr} className="w-full h-full object-cover" />
-                                    {photoItem.isUploaded && (
-                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1">
-                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
+                                    
+                                    {!isUploaded ? (
+                                      <div className="absolute top-2 left-2 bg-orange-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <AlertCircle className="w-3 h-3" /> 대기중
+                                      </div>
+                                    ) : (
+                                      <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <Cloud className="w-3 h-3" /> 저장됨
                                       </div>
                                     )}
-                                    <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md"><Trash2 className="w-4 h-4" /></button>
+                                    <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-20"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                                 )
                               })}
+                              
+                              {/* 사진 팝업을 부르는 버튼 */}
                               {safePhotos.length < 10 && (
-                                <label className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 cursor-pointer transition-colors relative">
+                                <button 
+                                  onClick={() => setPhotoPopupProcessId(process.id)}
+                                  className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
+                                >
                                   <Camera className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-medium text-center">사진 촬영<br/>(자동 압축됨)</span>
-                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleMediaCapture(e, process.id, 'photo')} />
-                                </label>
+                                  <span className="text-xs font-bold text-center">1. 사진 선택<br/>(자동 저장)</span>
+                                </button>
                               )}
                             </div>
                           </div>
 
-                          {/* 2. 작업내용 */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
@@ -1038,7 +1033,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             />
                           </div>
 
-                          {/* 3. 작업시간 (칩 UI) */}
                           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
                             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
                               <span className="text-blue-500">3.</span> 작업시간
@@ -1088,7 +1082,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 4. 작업정보 (음성요약과 직접작성 분리) */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
@@ -1097,7 +1090,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             
                             <div className="space-y-4">
-                              {/* 4-1. 음성 요약 영역 */}
                               <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
                                 <div className="flex items-center justify-between mb-2">
                                   <span className="text-xs font-bold text-blue-800">🎙️ AI 음성 요약</span>
@@ -1134,13 +1126,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                 />
                               </div>
 
-                              {/* 4-2. 직접 작성 영역 (세분화 됨) */}
                               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-4">
                                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                                   <span className="text-xs font-bold text-slate-700">✍️ 직접 작성 (상세 분류)</span>
                                 </div>
                                 
-                                {/* 1) 작업량 */}
                                 <div>
                                   <div className="flex justify-between items-center mb-1.5">
                                     <span className="text-xs font-bold text-slate-600">1) 작업량</span>
@@ -1171,7 +1161,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                   </div>
                                 </div>
 
-                                {/* 2) 중량물 */}
                                 <div className="pt-2 border-t border-slate-100">
                                   <div className="flex justify-between items-center mb-1.5">
                                     <span className="text-xs font-bold text-slate-600">2) 중량물 취급</span>
@@ -1205,7 +1194,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                   </div>
                                 </div>
 
-                                {/* 3) 수공구 */}
                                 <div className="pt-2 border-t border-slate-100">
                                   <div className="flex justify-between items-center mb-1.5">
                                     <span className="text-xs font-bold text-slate-600">3) 수공구 취급</span>
@@ -1239,7 +1227,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                   </div>
                                 </div>
 
-                                {/* 4) 추가 정보 공란 */}
                                 <div className="pt-2 border-t border-slate-100">
                                   <div className="flex items-center justify-between mb-1.5">
                                     <span className="text-xs font-bold text-slate-600">4) 추가 정보 (직접 작성)</span>
@@ -1261,7 +1248,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 5. 작업부하 및 빈도 */}
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center">
                               <span className="text-blue-500 mr-1">5.</span> 작업부하 및 작업빈도
@@ -1306,7 +1292,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 6. 동영상 첨부 (즉시업로드 방식) */}
+                          {/* 6. 동영상 첨부 및 안전한 자동 등록 로직 */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
@@ -1314,27 +1300,33 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               {safeVideos.map((videoItem, vIdx) => {
-                                // 💡 객체/문자열 구조 판별
                                 const srcStr = typeof videoItem === 'string' ? videoItem : videoItem.base64;
+                                const isUploaded = typeof videoItem === 'object' && videoItem.isUploaded;
+                                
                                 return (
                                   <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
                                     <video src={srcStr} controls className="w-full h-full object-cover"></video>
-                                    {videoItem.isUploaded && (
+                                    
+                                    {!isUploaded ? (
+                                      <div className="absolute top-2 left-2 bg-orange-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <AlertCircle className="w-3 h-3" /> 대기중
+                                      </div>
+                                    ) : (
                                       <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
-                                        <Cloud className="w-3 h-3" /> 드라이브 저장됨
+                                        <Cloud className="w-3 h-3" /> 저장됨
                                       </div>
                                     )}
-                                    <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-10"><Trash2 className="w-4 h-4" /></button>
+                                    <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-20"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                                 )
                               })}
                               {safeVideos.length < 4 && (
                                 <button 
                                   onClick={() => setVideoPopupProcessId(process.id)}
-                                  className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
+                                  className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
                                 >
                                   <VideoIcon className="w-8 h-8 mb-1" />
-                                  <span className="text-xs font-bold text-slate-600 text-center">동영상 촬영<br/>(어플 선택)</span>
+                                  <span className="text-xs font-bold text-center">1. 동영상 선택<br/>(자동 저장)</span>
                                   <span className="text-[10px] text-red-500 mt-1 font-bold">※ 최대 30MB</span>
                                 </button>
                               )}
@@ -1347,14 +1339,79 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   })}
                 </main>
 
-                {/* 하단 고정 FAB */}
                 <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent pt-12">
                   <button onClick={addProcess} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-lg shadow-lg shadow-slate-800/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
                     <Plus className="w-6 h-6" /> 신규 공정 생성 (기기 임시저장)
                   </button>
                 </div>
 
-                {/* 🔥 동영상 카메라 어플 선택 커스텀 팝업 (모달) */}
+                {/* 🔥 사진 촬영/첨부 커스텀 팝업 (모달) */}
+                {photoPopupProcessId && (
+                  <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                      <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-800">사진 첨부 방식</h3>
+                          <p className="text-xs text-slate-500 mt-1">원하시는 방식을 선택해 주세요.</p>
+                        </div>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        
+                        {/* 옵션 1: 기본 카메라 바로 실행 */}
+                        <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
+                          <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
+                            <Camera className="w-6 h-6" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-blue-800 text-[15px] mb-0.5">기본 카메라 촬영</div>
+                            <div className="text-[11px] font-medium text-blue-600/80 leading-tight">카메라를 열어 즉시 촬영합니다.</div>
+                          </div>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            capture="environment" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleMediaCaptureSafeAuto(e, photoPopupProcessId, 'photo'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              setPhotoPopupProcessId(null);
+                            }} 
+                          />
+                        </label>
+
+                        {/* 옵션 2: 갤러리 */}
+                        <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors shadow-sm">
+                          <div className="bg-slate-400 p-2.5 rounded-full text-white shrink-0 shadow-md">
+                            <ImageIcon className="w-6 h-6" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-slate-700 text-[15px] mb-0.5">갤러리 (사진 첨부)</div>
+                            <div className="text-[11px] font-medium text-slate-500 leading-tight">스마트폰 갤러리에 저장된 사진을 불러옵니다.</div>
+                          </div>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleMediaCaptureSafeAuto(e, photoPopupProcessId, 'photo'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              setPhotoPopupProcessId(null);
+                            }} 
+                          />
+                        </label>
+
+                      </div>
+                      <div className="p-4 bg-slate-50 border-t border-slate-100">
+                        <button 
+                          onClick={() => setPhotoPopupProcessId(null)}
+                          className="w-full py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 🔥 동영상 촬영/첨부 커스텀 팝업 (모달) */}
                 {videoPopupProcessId && (
                   <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -1366,7 +1423,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                       </div>
                       <div className="p-4 space-y-3">
                         
-                        {/* 옵션 1: 오픈 카메라 (어플 선택) */}
                         <label className="flex items-center gap-4 p-4 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer hover:bg-purple-100 transition-colors shadow-sm">
                           <div className="bg-purple-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <VideoIcon className="w-6 h-6" />
@@ -1380,13 +1436,12 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
                               setVideoPopupProcessId(null);
                             }} 
                           />
                         </label>
 
-                        {/* 옵션 2: 기본 카메라 바로 실행 */}
                         <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
                           <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <Camera className="w-6 h-6" />
@@ -1395,20 +1450,18 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             <div className="font-bold text-blue-800 text-[15px] mb-0.5">기본 카메라 (바로 실행)</div>
                             <div className="text-[11px] font-medium text-blue-600/80 leading-tight">스마트폰 내장 카메라를 즉시 켭니다. (저화질 설정 필수)</div>
                           </div>
-                          {/* capture="environment"를 통해 강제 호출 */}
                           <input 
                             type="file" 
                             accept="video/*" 
                             capture="environment" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
                               setVideoPopupProcessId(null);
                             }} 
                           />
                         </label>
 
-                        {/* 옵션 3: 갤러리 */}
                         <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors shadow-sm">
                           <div className="bg-slate-400 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <ImageIcon className="w-6 h-6" />
@@ -1422,7 +1475,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCapture(e, videoPopupProcessId, 'video');
+                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
                               setVideoPopupProcessId(null);
                             }} 
                           />
