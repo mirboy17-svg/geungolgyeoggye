@@ -57,7 +57,6 @@
           { value: 5, label: '초과근무시간(1일8시간 이상)' }
         ];
 
-        // 작업 시간 옵션
         const WORK_START_HOURS = ['06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00'];
         const WORK_END_HOURS = ['15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00'];
         const LUNCH_START_HOURS = ['11:00', '11:30', '12:00', '12:30', '13:00'];
@@ -85,7 +84,6 @@
           videos: []
         });
 
-        // 💡 [OOM 방지] 캔버스 및 이미지 메모리 누수 강제 차단 압축 로직
         const compressImage = (file) => {
           return new Promise((resolve) => {
             const reader = new FileReader();
@@ -112,7 +110,6 @@
                 ctx.drawImage(img, 0, 0, width, height);
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
-                // 🔥 OOM(메모리 부족) 방지를 위한 캔버스 및 이미지 객체 강제 초기화
                 canvas.width = 0;
                 canvas.height = 0;
                 img.src = '';
@@ -123,41 +120,22 @@
           });
         };
 
-        // 💡 AI 대화 요약 (Gemini API)
         const summarizeTextWithRetry = async (text, field, retries = 5) => {
           const apiKey = ""; 
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
           
           const fieldName = field === 'workContent' ? '작업내용' : '작업정보(취급 무게, 자세, 빈도 등)';
-          
-          const systemPrompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI(Liner 스타일)'입니다. 
-근로자와의 인터뷰 음성을 분석하여 구조화된 요약 보고서를 작성해 주세요.
-
-[회의록 요약 및 자동화 엄격 규칙]
-1. '어', '그', '음', '막' 같은 추임새, 감탄사, 인사말, 감정적 호소(아프다, 힘들다), 잡담 등 쓸데없는 언어는 100% 삭제합니다.
-2. 답변을 구어체가 아닌, 객관적이고 건조한 보고서용 명사형 문장(~음, ~함)으로 변환합니다.
-3. 구체적인 수치(무게, 횟수, 시간)와 객관적 사실, 위험 요인(불편 부위, 불안정한 자세)만 정확히 포착합니다.
-4. 내용을 카테고리별로 구조화(기호 '-' 활용)하여 가독성을 높입니다.
-
-[출력 포맷: ${fieldName}에 맞게 구성]
-${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- ' : '■ 취급 중량 및 빈도\n- \n■ 주요 작업 자세 및 특이사항\n- '}`;
+          const systemPrompt = `당신은 최고 수준의 '산업보건 인터뷰 회의록 자동화 AI'입니다. 불필요한 언어는 100% 삭제하고 건조한 보고서용 명사형 문장(~음, ~함)으로 요약하세요.\n[출력 포맷: ${fieldName}에 맞게 구성]\n${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- ' : '■ 취급 중량 및 빈도\n- \n■ 주요 작업 자세 및 특이사항\n- '}`;
 
           const payload = { 
             contents: [{ parts: [{ text: `[실제 인터뷰 대화 내용]\n${text}` }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: {
-              temperature: 0.0, 
-              maxOutputTokens: 300 
-            }
+            generationConfig: { temperature: 0.0, maxOutputTokens: 300 }
           };
           
           for (let i = 0; i < retries; i++) {
             try {
-              const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
+              const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
               if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
               const data = await res.json();
               return data.candidates[0].content.parts[0].text.trim();
@@ -168,7 +146,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           }
         };
 
-        // --- 메인 앱 ---
         function MobileApp() {
           const [companyName, setCompanyName] = useState('');
           const [isCustomCompany, setIsCustomCompany] = useState(false); 
@@ -179,15 +156,16 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           const [lastSyncTime, setLastSyncTime] = useState('');
           const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, text: '', percentage: 0 });
 
-          // 💡 구글 시트 옵션
           const [fetchedCompanies, setFetchedCompanies] = useState([]);
           const [fetchedProcessMap, setFetchedProcessMap] = useState({}); 
 
-          // 💡 모달 State
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
           const [photoPopupProcessId, setPhotoPopupProcessId] = useState(null); 
 
-          // 💡 음성 인식 State
+          // 💡 전송 취소를 위한 AbortController Ref 추가
+          const abortControllersRef = useRef({});
+          const globalAbortControllerRef = useRef(null);
+
           const [recordingField, setRecordingField] = useState(null); 
           const [isSummarizing, setIsSummarizing] = useState(false);
           const recognitionRef = useRef(null);
@@ -199,13 +177,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
           const TARGET_FOLDER_ID = '16DTHs4okhpe7dgXStwkp1KuhI3APU0JI';
           const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyoy87S02bO4eUFmoH89AxFsxjNmWzCrDtnkI7ZPOBuBJNND0INUA489XOpvpILNK9J/exec'; 
 
-          // 1. 구글 스프레드시트 데이터 불러오기 
           useEffect(() => {
             const fetchSpreadsheetData = async () => {
               try {
                 const SHEET_ID = '1J9MkuVO5cCMhpEZFVZrOnNPMJf-quZlBpr6YzrgBfbo';
                 const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=0`;
-                
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('Failed to fetch CSV');
                 const csvText = await response.text();
@@ -216,19 +192,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 let val = '';
                 for (let i = 0; i < csvText.length; i++) {
                   const char = csvText[i];
-                  if (char === '"') {
-                    inQuotes = !inQuotes;
-                  } else if (char === ',' && !inQuotes) {
-                    row.push(val.trim());
-                    val = '';
-                  } else if (char === '\n' && !inQuotes) {
-                    row.push(val.trim());
-                    rows.push(row);
-                    row = [];
-                    val = '';
-                  } else {
-                    val += char;
-                  }
+                  if (char === '"') { inQuotes = !inQuotes; } 
+                  else if (char === ',' && !inQuotes) { row.push(val.trim()); val = ''; } 
+                  else if (char === '\n' && !inQuotes) { row.push(val.trim()); rows.push(row); row = []; val = ''; } 
+                  else { val += char; }
                 }
                 row.push(val.trim());
                 rows.push(row);
@@ -243,9 +210,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   if (comp) {
                     companiesSet.add(comp);
                     if (!pMap[comp]) pMap[comp] = [];
-                    if (proc && !pMap[comp].includes(proc)) {
-                      pMap[comp].push(proc);
-                    }
+                    if (proc && !pMap[comp].includes(proc)) pMap[comp].push(proc);
                   }
                 });
 
@@ -253,11 +218,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 setFetchedProcessMap(pMap);
               } catch (error) {}
             };
-            
             fetchSpreadsheetData();
           }, []);
 
-          // 2. 초기 로컬 스토리지 불러오기 (최초 1회)
           const isInitialMount = useRef(true);
           useEffect(() => {
             try {
@@ -286,14 +249,19 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           }, []);
 
-          // 💡 3. [백그라운드 킬 강제 차단] - 글자 입력 등 상태가 바뀔 때마다 실시간 영구 자동저장
           useEffect(() => {
             if (isInitialMount.current) {
               isInitialMount.current = false;
-              return; // 첫 로드 시 빈 데이터로 덮어씌워지는 것 방지
+              return; 
             }
             if (processes.length > 0) {
-              localStorage.setItem('localProcessData', JSON.stringify(processes));
+              // 💡 저장 시 임시 preview URL은 용량 문제로 제외하고 저장 (base64만 저장)
+              const dataToSave = processes.map(p => ({
+                ...p,
+                photos: p.photos.map(photo => typeof photo === 'object' && photo ? { ...photo, previewUrl: null } : photo),
+                videos: p.videos.map(video => typeof video === 'object' && video ? { ...video, previewUrl: null } : video)
+              }));
+              localStorage.setItem('localProcessData', JSON.stringify(dataToSave));
             }
           }, [processes]);
 
@@ -310,12 +278,8 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }
           }, [toastMessage, isSyncing, isSummarizing, recordingField]);
 
-          // 음성 요약 실행
           const executeSummary = async (textToSummarize, processId, field) => {
-            if (textToSummarize.length === 0) {
-              setToastMessage('⚠️ 입력된 음성이 없습니다.');
-              return;
-            }
+            if (textToSummarize.length === 0) return setToastMessage('⚠️ 입력된 음성이 없습니다.');
             setToastMessage('⏳ AI가 대화 내용을 즉시 요약 중입니다...');
             setIsSummarizing(true);
             try {
@@ -327,10 +291,9 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                 }
                 return p;
               }));
-              setToastMessage('✨ 요약 완료 및 입력되었습니다.');
+              setToastMessage('✨ 요약 완료!');
             } catch (error) {
-              console.error("AI 요약 실패:", error);
-              setToastMessage('❌ 요약 중 오류 발생. 원문을 입력합니다.');
+              setToastMessage('❌ 요약 오류 발생. 원문을 입력합니다.');
               setProcesses(prev => prev.map(p => {
                 if (p.id === processId) {
                   const existingText = p[field] ? p[field] + '\n' : '';
@@ -362,18 +325,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               executeSummary(finalText, processId, field);
             } 
             else {
-              if (!SpeechRecognition) {
-                alert('해당 브라우저에서는 음성 인식을 지원하지 않습니다.');
-                return;
-              }
-
+              if (!SpeechRecognition) return alert('해당 브라우저에서는 음성 인식을 지원하지 않습니다.');
               try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 stream.getTracks().forEach(track => track.stop()); 
-              } catch (err) {
-                alert("마이크 권한이 거부되었습니다. 권한을 '허용'으로 변경해주세요.");
-                return;
-              }
+              } catch (err) { return alert("마이크 권한을 허용으로 변경해주세요."); }
 
               manualStopRef.current = false; 
               transcriptRef.current = '';
@@ -382,13 +338,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
 
               recordingTimerRef.current = setTimeout(() => {
-                setToastMessage('⏳ 최대 녹음 시간(5분)에 도달하여 요약을 시작합니다.');
+                setToastMessage('⏳ 최대 녹음 시간(5분) 도달. 요약 시작.');
                 manualStopRef.current = true;
                 const finalText = (transcriptRef.current + ' ' + currentSessionTextRef.current).trim();
-                if (recognitionRef.current) {
-                  recognitionRef.current.onend = null;
-                  recognitionRef.current.abort();
-                }
+                if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.abort(); }
                 setRecordingField(null);
                 transcriptRef.current = '';
                 currentSessionTextRef.current = '';
@@ -402,9 +355,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
 
               recognition.onresult = (event) => {
                 let sessionText = '';
-                for (let i = 0; i < event.results.length; ++i) {
-                  sessionText += event.results[i][0].transcript;
-                }
+                for (let i = 0; i < event.results.length; ++i) sessionText += event.results[i][0].transcript;
                 currentSessionTextRef.current = sessionText;
               };
 
@@ -420,123 +371,163 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   transcriptRef.current += currentSessionTextRef.current.trim() + ' ';
                   currentSessionTextRef.current = '';
                 }
-                if (!manualStopRef.current) {
-                  try { recognition.start(); } catch (e) {}
-                }
+                if (!manualStopRef.current) { try { recognition.start(); } catch (e) {} }
               };
 
               try {
                 recognition.start();
                 recognitionRef.current = recognition;
                 setRecordingField(fieldKey);
-                setToastMessage('🎙️ 대화 녹음 중... (직접 종료 버튼을 누를 때까지 꺼지지 않습니다)');
+                setToastMessage('🎙️ 대화 녹음 중...');
               } catch(e) { console.error(e); }
             }
           };
 
-          // 🚀 💡 [통신 타이밍 충돌 방지] 안전한 자동 전송 로직 (다시 원상복구 및 강화)
-          const handleMediaCaptureSafeAuto = async (e, processId, type) => {
+          // 🚀 💡 [핵심] 비동기 백그라운드 독립 전송 로직 (화면 멈춤 없음)
+          const handleMediaCaptureBackground = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
 
             const maxSizeMB = type === 'photo' ? 10 : 30; 
             if (file.size > maxSizeMB * 1024 * 1024) {
-              alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n\n해결방법: 카메라 설정에서 화질을 낮춰주세요.`);
+              alert(`⚠️ 파일 용량이 너무 큽니다! (${(file.size / 1024 / 1024).toFixed(1)}MB)\n화질을 낮춰주세요.`);
               e.target.value = null;
               return;
             }
 
-            // 🔥 1. 통신 타이밍 충돌 원천 차단: 카메라 종료 후 운영체제가 숨 고를 시간 강제 대기 (최소화: 300ms)
-            setToastMessage(`⏳ ${type === 'photo' ? '사진' : '동영상'} 처리 준비 중... (화면을 유지해주세요)`);
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // 1. UI에 즉시 반영할 임시 ID와 미리보기 URL 생성 (속도 체감 0.1초)
+            const tempId = Date.now().toString() + Math.random().toString(36).substring(7);
+            const previewUrl = URL.createObjectURL(file);
 
-            setIsSyncing(true);
-            setUploadProgress({ 
-              current: 0, total: 1, 
-              text: `☁️ 구글 서버로 자동 전송을 시작합니다...`, 
-              percentage: 20 
-            });
+            // 💡 취소 컨트롤러 생성 및 저장
+            const abortController = new AbortController();
+            abortControllersRef.current[tempId] = abortController;
 
-            let base64Data = null; 
+            setProcesses(prev => prev.map(p => {
+                if (p.id === processId) {
+                    const newItem = { id: tempId, isUploaded: false, isUploading: true, previewUrl: previewUrl, base64: null };
+                    return type === 'photo'
+                        ? { ...p, photos: [...(p.photos || []), newItem] }
+                        : { ...p, videos: [...(p.videos || []), newItem] };
+                }
+                return p;
+            }));
 
-            try {
-              if (type === 'photo') {
-                base64Data = await compressImage(file);
-              } else {
-                base64Data = await new Promise((resolve) => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => resolve(reader.result);
-                  reader.readAsDataURL(file);
-                });
-              }
-
-              setUploadProgress({ current: 0, total: 1, text: `☁️ 구글 드라이브에 저장 중...`, percentage: 60 });
-
-              const currentProcess = processes.find(p => p.id === processId);
-              const pName = currentProcess?.processName || '미지정공정';
-              const fileExt = type === 'photo' ? 'jpg' : 'mp4';
-              
-              const catPrefix = category ? `(${category})` : '';
-              const mediaCount = type === 'photo' ? (currentProcess.photos?.length || 0) : (currentProcess.videos?.length || 0);
-              const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}_${type === 'photo'?'사진':'동영상'}${mediaCount + 1}.${fileExt}`;
-
-              if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
-                 throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
-              }
-
-              // 2. 구글 앱스 스크립트로 전송
-              const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
-              const response = await fetch(fetchUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({
-                  type: 'media',
-                  folderId: TARGET_FOLDER_ID,
-                  fileName: fileName,
-                  fileData: base64Data
-                })
-              });
-              
-              const result = await response.json();
-              if (result.status !== "success") throw new Error(result.message);
-
-              setUploadProgress({ current: 1, total: 1, text: `✅ 업로드 완료!`, percentage: 100 });
-
-              const mediaObj = { isUploaded: true, base64: base64Data, fileName: fileName };
-              
-              setProcesses(prev => prev.map(p => {
-                  if (p.id === processId) {
-                      return type === 'photo' 
-                          ? { ...p, photos: [...(p.photos || []), mediaObj] }
-                          : { ...p, videos: [...(p.videos || []), mediaObj] };
-                  }
-                  return p;
-              }));
-
-              setTimeout(() => setIsSyncing(false), 800);
-
-            } catch (error) {
-              console.error(error);
-              alert("🚨 즉시 전송 실패: " + error.message + "\n\n통신이 불안정하여 기기에 임시 저장합니다. (최종 저장 시 다시 전송됩니다)");
-              
-              if (base64Data) {
-                // 실패 시 로컬에 저장하여 최종 저장 버튼 누를 때 재시도하게 됨
-                const fallbackMediaObj = { isUploaded: false, base64: base64Data, fileName: `임시저장_${Date.now()}` };
-                setProcesses(prev => prev.map(p => {
-                    if (p.id === processId) {
-                        return type === 'photo' 
-                            ? { ...p, photos: [...(p.photos || []), fallbackMediaObj] }
-                            : { ...p, videos: [...(p.videos || []), fallbackMediaObj] };
+            // 백그라운드 함수 실행 (await 하지 않음 = 화면 차단 안 함)
+            const processAndUpload = async () => {
+                let currentBase64 = null;
+                try {
+                    // 압축 또는 파일 읽기 진행
+                    if (type === 'photo') {
+                        currentBase64 = await compressImage(file);
+                    } else {
+                        currentBase64 = await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => resolve(reader.result);
+                            reader.readAsDataURL(file);
+                        });
                     }
-                    return p;
-                }));
-              }
-              setIsSyncing(false);
-            }
+
+                    const currentProcess = processes.find(p => p.id === processId);
+                    const pName = currentProcess?.processName || '미지정공정';
+                    const fileExt = type === 'photo' ? 'jpg' : 'mp4';
+                    const catPrefix = category ? `(${category})` : '';
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}_${type === 'photo'?'사진':'동영상'}_${tempId.substring(0,4)}.${fileExt}`;
+
+                    if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
+                        throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
+                    }
+
+                    // 구글 드라이브로 개별 전송
+                    const fetchUrl = GAS_WEB_APP_URL + (GAS_WEB_APP_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+                    const response = await fetch(fetchUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify({
+                            type: 'media',
+                            folderId: TARGET_FOLDER_ID,
+                            fileName: fileName,
+                            fileData: currentBase64
+                        }),
+                        signal: abortController.signal // 🔥 취소 신호 연결
+                    });
+
+                    const result = await response.json();
+                    if (result.status !== "success") throw new Error(result.message);
+
+                    // 완료 시 해당 사진만 상태 업데이트 (로딩 뱅글뱅글 제거)
+                    setProcesses(prev => prev.map(p => {
+                        if (p.id === processId) {
+                            const list = type === 'photo' ? p.photos : p.videos;
+                            const updatedList = list.map(item => item.id === tempId ? { ...item, isUploaded: true, isUploading: false, base64: currentBase64, fileName, previewUrl: null } : item);
+                            return { ...p, [type === 'photo' ? 'photos' : 'videos']: updatedList };
+                        }
+                        return p;
+                    }));
+
+                    delete abortControllersRef.current[tempId]; // 완료 후 정리
+
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.log('업로드 취소됨');
+                        return; // 사용자가 취소한 경우 조용히 종료
+                    }
+                    console.error("백그라운드 업로드 실패:", error);
+                    // 실패 시 임시 저장 상태로 전환하여 나중에 최종저장 때 다시 쏘도록 함
+                    setProcesses(prev => prev.map(p => {
+                        if (p.id === processId) {
+                            const list = type === 'photo' ? p.photos : p.videos;
+                            const updatedList = list.map(item => item.id === tempId ? { ...item, isUploaded: false, isUploading: false, uploadFailed: true, base64: currentBase64, previewUrl: null } : item);
+                            return { ...p, [type === 'photo' ? 'photos' : 'videos']: updatedList };
+                        }
+                        return p;
+                    }));
+                }
+            };
+
+            processAndUpload(); // 백그라운드 던져놓기
             e.target.value = null; // 인풋 초기화
           };
 
-          // 🚀 최종 텍스트 데이터 전송
+          // 💡 [신규] 개별 미디어 전송 취소 함수
+          const cancelUpload = (processId, mediaId, type) => {
+            // 통신 강제 중단
+            if (abortControllersRef.current[mediaId]) {
+              abortControllersRef.current[mediaId].abort();
+              delete abortControllersRef.current[mediaId];
+            }
+
+            // 화면에서 해당 미디어 즉시 삭제
+            setProcesses(prev => prev.map(p => {
+              if (p.id === processId) {
+                const list = type === 'photo' ? p.photos : p.videos;
+                const target = list.find(item => item.id === mediaId);
+                if (target && target.previewUrl) {
+                  URL.revokeObjectURL(target.previewUrl);
+                }
+                const updatedList = list.filter(item => item.id !== mediaId);
+                return { ...p, [type === 'photo' ? 'photos' : 'videos']: updatedList };
+              }
+              return p;
+            }));
+            setToastMessage('🚫 전송이 취소되었습니다.');
+          };
+
+          // 🚀 최종 텍스트 데이터 전송 (업로드 안 된 미디어가 있으면 검사)
+          const handleManualSave = () => {
+            // 업로드 중인 파일이 있는지 확인
+            const isAnyUploading = processes.some(p =>
+              (p.photos || []).some(photo => photo && typeof photo === 'object' && photo.isUploading) ||
+              (p.videos || []).some(video => video && typeof video === 'object' && video.isUploading)
+            );
+
+            if (isAnyUploading) {
+              alert("⏳ 현재 미디어 파일이 백그라운드에서 구글 서버로 업로드 중입니다.\n사진 위 로딩 아이콘이 사라지면 다시 최종 저장을 눌러주세요.");
+              return;
+            }
+            saveToServer(processes, false);
+          };
+
           const saveToServer = async (data, isAutoSave = false) => {
             localStorage.setItem('localProcessData', JSON.stringify(data));
             localStorage.setItem('localCompanyName', companyName);
@@ -550,6 +541,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               alert("소스코드에 구글 앱스 스크립트 URL이 입력되지 않았습니다!");
               return;
             }
+
+            // 💡 전체 동기화용 취소 컨트롤러 생성
+            globalAbortControllerRef.current = new AbortController();
+            const signal = globalAbortControllerRef.current.signal;
 
             setIsSyncing(true);
             
@@ -584,11 +579,12 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     ? validHandTools.map((item, i) => `${i+1}. 무게: ${item.weight||'미선택'}, 취급횟수: ${item.count||'미입력'}`).join('\n')
                     : '해당없음';
                   
+                  // 통신 실패로 아직 올라가지 못한 파일들만 모아서 재전송 큐에 넣기
                   (p.photos || []).forEach((photoItem, i) => {
                     const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_사진${i + 1}.jpg`;
                     if (typeof photoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem });
-                    } else if (photoItem && !photoItem.isUploaded) {
+                    } else if (photoItem && !photoItem.isUploaded && photoItem.base64) {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem.base64 });
                     }
                   });
@@ -596,7 +592,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                     const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_동영상${i + 1}.mp4`;
                      if (typeof videoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem });
-                    } else if (videoItem && !videoItem.isUploaded) {
+                    } else if (videoItem && !videoItem.isUploaded && videoItem.base64) {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem.base64 });
                     }
                   });
@@ -634,7 +630,8 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               let response = await fetch(fetchUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify(spreadsheetPayload)
+                body: JSON.stringify(spreadsheetPayload),
+                signal // 🔥 취소 신호 연결
               });
               let result = await response.json();
               if (result.status !== "success") throw new Error(result.message);
@@ -644,12 +641,13 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               if (mediaQueue.length > 0) {
                 updateProgress('☁️ 미전송 미디어 파일 동기화 중...');
                 
-                // 🔥 [속도 최적화] 하나씩 순서대로 올리던 방식에서 -> 여러 개를 동시에 한꺼번에 쏘는 방식(병렬 처리)으로 변경
+                // 🔥 [속도 최적화] 여러 개를 동시에 한꺼번에 쏘는 방식(병렬 처리)
                 const uploadPromises = mediaQueue.map(async (mediaItem) => {
                   const mediaResponse = await fetch(fetchUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify(mediaItem)
+                    body: JSON.stringify(mediaItem),
+                    signal // 🔥 취소 신호 연결
                   });
                   const mediaResult = await mediaResponse.json();
                   if (mediaResult.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
@@ -659,12 +657,11 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                   setUploadProgress({ 
                     current: completedTasks, 
                     total: totalTasks, 
-                    text: `업로드 진행 중... (${completedTasks}/${totalTasks})`, 
+                    text: `누락 파일 병렬 업로드 중... (${completedTasks}/${totalTasks})`, 
                     percentage 
                   });
                 });
 
-                // 모든 파일이 동시에 전송 완료될 때까지 대기
                 await Promise.all(uploadPromises);
               }
               
@@ -689,6 +686,10 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
               }, 600);
 
             } catch (error) {
+              if (error.name === 'AbortError') {
+                setIsSyncing(false);
+                return; // 사용자가 취소한 경우 조용히 종료
+              }
               console.error("업로드 실패:", error);
               alert("🚨 저장 실패: " + error.message);
               setToastMessage('❌ 업로드 중 오류가 발생했습니다.');
@@ -700,8 +701,6 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             saveToServer(processes, true);
             setProcesses([...processes, emptyProcess()]);
           };
-
-          const handleManualSave = () => saveToServer(processes, false);
 
           const handleReset = () => {
             if(window.confirm("모든 작성 내용이 삭제되고 초기화됩니다.\n계속하시겠습니까?")) {
@@ -756,11 +755,21 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
             }));
           };
 
+          // 미디어 삭제 시 메모리 누수(임시 URL) 정리 기능 포함
           const removeMedia = (processId, index, type) => {
             if(confirm(`이 ${type === 'photo' ? '사진' : '동영상'}을 삭제하시겠습니까?`)) {
-              setProcesses(processes.map(p => {
+              setProcesses(prev => prev.map(p => {
                   if (p.id === processId) {
                       const newList = [...(p[type === 'photo' ? 'photos' : 'videos'] || [])];
+                      const target = newList[index];
+                      
+                      // 🔥 삭제 시 업로드 중이라면 강제 취소
+                      if (target && target.id && abortControllersRef.current[target.id]) {
+                          abortControllersRef.current[target.id].abort();
+                          delete abortControllersRef.current[target.id];
+                      }
+
+                      if (target && target.previewUrl) URL.revokeObjectURL(target.previewUrl);
                       newList.splice(index, 1);
                       return type === 'photo' ? { ...p, photos: newList } : { ...p, videos: newList };
                   }
@@ -802,6 +811,17 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         <span className="text-xs font-bold text-slate-400">{uploadProgress.current} / {uploadProgress.total} 완료</span>
                         <span className="text-sm font-black text-blue-600">{uploadProgress.percentage}%</span>
                       </div>
+                      
+                      {/* 💡 전체 동기화 취소 버튼 추가 */}
+                      <button 
+                        onClick={() => {
+                          if (globalAbortControllerRef.current) globalAbortControllerRef.current.abort();
+                          setToastMessage('🚫 전체 동기화가 취소되었습니다.');
+                        }}
+                        className="mt-5 px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold rounded-xl transition-colors w-full border border-slate-200"
+                      >
+                        동기화 취소
+                      </button>
                     </div>
                   </div>
                 )}
@@ -960,7 +980,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                         </div>
 
                         <div className="p-4 space-y-5">
-                          {/* 1. 현장 사진 첨부 및 안전한 자동 등록 로직 */}
+                          {/* 1. 현장 사진 첨부 및 비동기 업로드 (UI 안 멈춤) */}
                           <div>
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">1.</span> 현장 사진 첨부</label>
@@ -968,35 +988,56 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               {safePhotos.map((photoItem, pIdx) => {
-                                const srcStr = typeof photoItem === 'string' ? photoItem : photoItem.base64;
+                                // 임시 미리보기 URL이 있으면 그걸 보여주고, 없으면 base64 (구조 호환)
+                                const srcStr = typeof photoItem === 'string' ? photoItem : (photoItem.previewUrl || photoItem.base64);
                                 const isUploaded = typeof photoItem === 'object' && photoItem.isUploaded;
+                                const isUploading = typeof photoItem === 'object' && photoItem.isUploading;
+                                const uploadFailed = typeof photoItem === 'object' && photoItem.uploadFailed;
 
                                 return (
                                   <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex flex-col group">
                                     <img src={srcStr} className="w-full h-full object-cover" />
                                     
-                                    {!isUploaded ? (
-                                      <div className="absolute top-2 left-2 bg-orange-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
-                                        <AlertCircle className="w-3 h-3" /> 대기중
+                                    {/* 💡 로딩 인디케이터 (백그라운드 전송 중) 및 취소 버튼 */}
+                                    {isUploading && (
+                                      <div className="absolute inset-0 bg-slate-900/60 flex flex-col items-center justify-center z-10 backdrop-blur-[2px]">
+                                        <RefreshCw className="w-5 h-5 text-white animate-spin mb-1" />
+                                        <span className="text-[10px] text-white font-bold mb-1.5">서버 전송 중...</span>
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); cancelUpload(process.id, photoItem.id, 'photo'); }}
+                                          className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-[10px] font-bold shadow-md transition-colors"
+                                        >
+                                          취소
+                                        </button>
                                       </div>
-                                    ) : (
+                                    )}
+
+                                    {/* 에러 상태 */}
+                                    {uploadFailed && (
+                                      <div className="absolute top-2 left-2 bg-red-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <AlertCircle className="w-3 h-3" /> 실패(나중에 저장됨)
+                                      </div>
+                                    )}
+
+                                    {/* 완료 상태 */}
+                                    {!isUploading && isUploaded && (
                                       <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
                                         <Cloud className="w-3 h-3" /> 저장됨
                                       </div>
                                     )}
+
                                     <button onClick={() => removeMedia(process.id, pIdx, 'photo')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-20"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                                 )
                               })}
                               
-                              {/* 사진 팝업을 부르는 버튼 */}
                               {safePhotos.length < 10 && (
                                 <button 
                                   onClick={() => setPhotoPopupProcessId(process.id)}
                                   className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
                                 >
                                   <Camera className="w-8 h-8 mb-2" />
-                                  <span className="text-xs font-bold text-center">1. 사진 선택<br/>(자동 저장)</span>
+                                  <span className="text-xs font-bold text-center">1. 사진 선택<br/>(자동 전송)</span>
                                 </button>
                               )}
                             </div>
@@ -1299,7 +1340,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                           </div>
 
-                          {/* 6. 동영상 첨부 및 안전한 자동 등록 로직 */}
+                          {/* 6. 동영상 첨부 및 비동기 업로드 */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
@@ -1307,22 +1348,41 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               {safeVideos.map((videoItem, vIdx) => {
-                                const srcStr = typeof videoItem === 'string' ? videoItem : videoItem.base64;
+                                const srcStr = typeof videoItem === 'string' ? videoItem : (videoItem.previewUrl || videoItem.base64);
                                 const isUploaded = typeof videoItem === 'object' && videoItem.isUploaded;
+                                const isUploading = typeof videoItem === 'object' && videoItem.isUploading;
+                                const uploadFailed = typeof videoItem === 'object' && videoItem.uploadFailed;
                                 
                                 return (
                                   <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
                                     <video src={srcStr} controls className="w-full h-full object-cover"></video>
                                     
-                                    {!isUploaded ? (
-                                      <div className="absolute top-2 left-2 bg-orange-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
-                                        <AlertCircle className="w-3 h-3" /> 대기중
+                                    {/* 💡 동영상 로딩 인디케이터 및 취소 버튼 */}
+                                    {isUploading && (
+                                      <div className="absolute inset-0 bg-slate-900/60 flex flex-col items-center justify-center z-10 backdrop-blur-[2px]">
+                                        <RefreshCw className="w-5 h-5 text-white animate-spin mb-1" />
+                                        <span className="text-[10px] text-white font-bold mb-1.5">서버 전송 중...</span>
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); cancelUpload(process.id, videoItem.id, 'video'); }}
+                                          className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-[10px] font-bold shadow-md transition-colors"
+                                        >
+                                          취소
+                                        </button>
                                       </div>
-                                    ) : (
+                                    )}
+
+                                    {uploadFailed && (
+                                      <div className="absolute top-2 left-2 bg-red-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
+                                        <AlertCircle className="w-3 h-3" /> 실패(나중에 저장됨)
+                                      </div>
+                                    )}
+
+                                    {!isUploading && isUploaded && (
                                       <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
                                         <Cloud className="w-3 h-3" /> 저장됨
                                       </div>
                                     )}
+
                                     <button onClick={() => removeMedia(process.id, vIdx, 'video')} className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-md z-20"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                                 )
@@ -1333,7 +1393,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                                   className="w-full aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors relative outline-none"
                                 >
                                   <VideoIcon className="w-8 h-8 mb-1" />
-                                  <span className="text-xs font-bold text-center">1. 동영상 선택<br/>(자동 저장)</span>
+                                  <span className="text-xs font-bold text-center">1. 동영상 선택<br/>(자동 전송)</span>
                                   <span className="text-[10px] text-red-500 mt-1 font-bold">※ 최대 30MB</span>
                                 </button>
                               )}
@@ -1379,7 +1439,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             capture="environment" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureSafeAuto(e, photoPopupProcessId, 'photo'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); // 🔥 논블로킹 함수로 교체
                               setPhotoPopupProcessId(null);
                             }} 
                           />
@@ -1399,7 +1459,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             accept="image/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureSafeAuto(e, photoPopupProcessId, 'photo'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); // 🔥 논블로킹 함수로 교체
                               setPhotoPopupProcessId(null);
                             }} 
                           />
@@ -1443,7 +1503,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
                               setVideoPopupProcessId(null);
                             }} 
                           />
@@ -1463,7 +1523,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             capture="environment" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
                               setVideoPopupProcessId(null);
                             }} 
                           />
@@ -1482,7 +1542,7 @@ ${field === 'workContent' ? '■ 핵심 요약\n- \n■ 세부 작업 순서\n- 
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureSafeAuto(e, videoPopupProcessId, 'video'); // 🔥 OOM 및 타이밍 방지 자동전송 적용
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
                               setVideoPopupProcessId(null);
                             }} 
                           />
