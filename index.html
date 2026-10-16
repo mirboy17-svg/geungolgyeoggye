@@ -67,6 +67,8 @@
           id: 'proc_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
           processName: '',
           isCustomProcess: false, 
+          subProcessName: '',
+          isCustomSubProcess: false,
           workContent: '',
           workTimeStart: '',
           workTimeEnd: '',
@@ -75,7 +77,7 @@
           workTimeManual: '',
           workInfo: '',        
           workInfoManual: '',  
-          workloads: [{ count: '', duration: '' }],           
+          workloads: [{ count: '', duration: '' }],            
           heavyObjects: [{ weight: '', count: '' }],          
           handTools: [{ weight: '', count: '' }],             
           workload: 0,
@@ -162,7 +164,7 @@
           const [videoPopupProcessId, setVideoPopupProcessId] = useState(null);
           const [photoPopupProcessId, setPhotoPopupProcessId] = useState(null); 
 
-          // 💡 전송 취소를 위한 AbortController Ref 추가
+          // 전송 취소를 위한 AbortController Ref 추가
           const abortControllersRef = useRef({});
           const globalAbortControllerRef = useRef(null);
 
@@ -207,10 +209,20 @@
                   if (idx === 0) return; 
                   const comp = r[0];
                   const proc = r[1];
+                  const subProc = r[2]; // 세부공정 파싱 추가
+                  
                   if (comp) {
                     companiesSet.add(comp);
-                    if (!pMap[comp]) pMap[comp] = [];
-                    if (proc && !pMap[comp].includes(proc)) pMap[comp].push(proc);
+                    if (!pMap[comp]) pMap[comp] = { processes: [], subProcesses: {} };
+                    
+                    if (proc) {
+                      if (!pMap[comp].processes.includes(proc)) pMap[comp].processes.push(proc);
+                      
+                      if (subProc) {
+                        if (!pMap[comp].subProcesses[proc]) pMap[comp].subProcesses[proc] = [];
+                        if (!pMap[comp].subProcesses[proc].includes(subProc)) pMap[comp].subProcesses[proc].push(subProc);
+                      }
+                    }
                   }
                 });
 
@@ -255,7 +267,7 @@
               return; 
             }
             if (processes.length > 0) {
-              // 💡 저장 시 임시 preview URL은 용량 문제로 제외하고 저장 (base64만 저장)
+              // 저장 시 임시 preview URL은 용량 문제로 제외하고 저장 (base64만 저장)
               const dataToSave = processes.map(p => ({
                 ...p,
                 photos: p.photos.map(photo => typeof photo === 'object' && photo ? { ...photo, previewUrl: null } : photo),
@@ -383,7 +395,7 @@
             }
           };
 
-          // 🚀 💡 [핵심] 비동기 백그라운드 독립 전송 로직 (화면 멈춤 없음)
+          // 백그라운드 독립 전송 로직 (화면 멈춤 없음)
           const handleMediaCaptureBackground = async (e, processId, type) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -395,11 +407,11 @@
               return;
             }
 
-            // 1. UI에 즉시 반영할 임시 ID와 미리보기 URL 생성 (속도 체감 0.1초)
+            // UI에 즉시 반영할 임시 ID와 미리보기 URL 생성
             const tempId = Date.now().toString() + Math.random().toString(36).substring(7);
             const previewUrl = URL.createObjectURL(file);
 
-            // 💡 취소 컨트롤러 생성 및 저장
+            // 취소 컨트롤러 생성 및 저장
             const abortController = new AbortController();
             abortControllersRef.current[tempId] = abortController;
 
@@ -413,7 +425,7 @@
                 return p;
             }));
 
-            // 백그라운드 함수 실행 (await 하지 않음 = 화면 차단 안 함)
+            // 백그라운드 함수 실행 (await 하지 않음)
             const processAndUpload = async () => {
                 let currentBase64 = null;
                 try {
@@ -449,13 +461,13 @@
                             fileName: fileName,
                             fileData: currentBase64
                         }),
-                        signal: abortController.signal // 🔥 취소 신호 연결
+                        signal: abortController.signal // 취소 신호 연결
                     });
 
                     const result = await response.json();
                     if (result.status !== "success") throw new Error(result.message);
 
-                    // 완료 시 해당 사진만 상태 업데이트 (로딩 뱅글뱅글 제거)
+                    // 완료 시 해당 사진만 상태 업데이트
                     setProcesses(prev => prev.map(p => {
                         if (p.id === processId) {
                             const list = type === 'photo' ? p.photos : p.videos;
@@ -489,7 +501,6 @@
             e.target.value = null; // 인풋 초기화
           };
 
-          // 💡 [신규] 개별 미디어 전송 취소 함수
           const cancelUpload = (processId, mediaId, type) => {
             // 통신 강제 중단
             if (abortControllersRef.current[mediaId]) {
@@ -513,7 +524,6 @@
             setToastMessage('🚫 전송이 취소되었습니다.');
           };
 
-          // 🚀 최종 텍스트 데이터 전송 (업로드 안 된 미디어가 있으면 검사)
           const handleManualSave = () => {
             // 업로드 중인 파일이 있는지 확인
             const isAnyUploading = processes.some(p =>
@@ -542,7 +552,7 @@
               return;
             }
 
-            // 💡 전체 동기화용 취소 컨트롤러 생성
+            // 전체 동기화용 취소 컨트롤러 생성
             globalAbortControllerRef.current = new AbortController();
             const signal = globalAbortControllerRef.current.signal;
 
@@ -602,6 +612,7 @@
                     info: {
                       "단위사업체": companyName || '미지정사업체',
                       "공정명": processName,
+                      "세부공정명": p.subProcessName || '미선택',
                       "작업내용": p.workContent || '미입력',
                       "작업시간": formattedWorkTime,
                       "작업정보 (음성요약)": p.workInfo || '해당없음',
@@ -631,7 +642,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(spreadsheetPayload),
-                signal // 🔥 취소 신호 연결
+                signal // 취소 신호 연결
               });
               let result = await response.json();
               if (result.status !== "success") throw new Error(result.message);
@@ -641,13 +652,13 @@
               if (mediaQueue.length > 0) {
                 updateProgress('☁️ 미전송 미디어 파일 동기화 중...');
                 
-                // 🔥 [속도 최적화] 여러 개를 동시에 한꺼번에 쏘는 방식(병렬 처리)
+                // 여러 개를 동시에 한꺼번에 쏘는 방식(병렬 처리)
                 const uploadPromises = mediaQueue.map(async (mediaItem) => {
                   const mediaResponse = await fetch(fetchUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(mediaItem),
-                    signal // 🔥 취소 신호 연결
+                    signal // 취소 신호 연결
                   });
                   const mediaResult = await mediaResponse.json();
                   if (mediaResult.status !== "success") throw new Error(`업로드 실패: ${mediaItem.fileName}`);
@@ -755,7 +766,6 @@
             }));
           };
 
-          // 미디어 삭제 시 메모리 누수(임시 URL) 정리 기능 포함
           const removeMedia = (processId, index, type) => {
             if(confirm(`이 ${type === 'photo' ? '사진' : '동영상'}을 삭제하시겠습니까?`)) {
               setProcesses(prev => prev.map(p => {
@@ -763,7 +773,7 @@
                       const newList = [...(p[type === 'photo' ? 'photos' : 'videos'] || [])];
                       const target = newList[index];
                       
-                      // 🔥 삭제 시 업로드 중이라면 강제 취소
+                      // 삭제 시 업로드 중이라면 강제 취소
                       if (target && target.id && abortControllersRef.current[target.id]) {
                           abortControllersRef.current[target.id].abort();
                           delete abortControllersRef.current[target.id];
@@ -789,6 +799,7 @@
             <div className="flex justify-center bg-slate-200 min-h-screen font-sans">
               <div className="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
                 
+                {/* 동기화 팝업 */}
                 {isSyncing && (
                   <div className="fixed inset-0 z-[120] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl p-6 w-full shadow-2xl flex flex-col items-center">
@@ -812,7 +823,6 @@
                         <span className="text-sm font-black text-blue-600">{uploadProgress.percentage}%</span>
                       </div>
                       
-                      {/* 💡 전체 동기화 취소 버튼 추가 */}
                       <button 
                         onClick={() => {
                           if (globalAbortControllerRef.current) globalAbortControllerRef.current.abort();
@@ -826,6 +836,7 @@
                   </div>
                 )}
 
+                {/* 토스트 메시지 */}
                 {toastMessage && !isSyncing && !isSummarizing && !recordingField && (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-11/12 max-w-sm">
                     <div className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
@@ -835,6 +846,7 @@
                   </div>
                 )}
 
+                {/* 상단 헤더 */}
                 <header className="bg-blue-600 text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <ChevronLeft className="w-6 h-6" />
@@ -870,6 +882,7 @@
                 </header>
 
                 <main className="flex-1 overflow-y-auto p-4 pb-24 space-y-6">
+                  {/* 안내 메시지 */}
                   <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-blue-100">
                     <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                     <div className="flex-1">
@@ -877,6 +890,7 @@
                     </div>
                   </div>
 
+                  {/* 사업체 입력란 */}
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-300">
                     <label className="block text-sm font-bold text-slate-800 mb-2">
                       <span className="text-blue-600">■</span> 단위사업체 명 (대분류)
@@ -930,50 +944,87 @@
                     </div>
                   </div>
 
+                  {}
                   {processes.map((process, index) => {
                     const score = process.workload * process.frequency;
                     const scoreInfo = getScoreInfo(score);
                     const safePhotos = process.photos || [];
                     const safeVideos = process.videos || [];
-                    const availableProcesses = fetchedProcessMap[companyName] || [];
+                    const availableProcesses = fetchedProcessMap[companyName]?.processes || [];
+                    const availableSubProcesses = fetchedProcessMap[companyName]?.subProcesses?.[process.processName] || [];
 
                     return (
                       <div key={process.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
-                          <div className="flex items-center gap-2">
-                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0">{index + 1}</span>
+                        <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-start">
+                          <div className="flex items-start gap-2">
+                            <span className="bg-slate-800 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1">{index + 1}</span>
                             
-                            <div className="flex flex-col gap-1.5 w-48">
-                              <select 
-                                className="bg-transparent font-bold text-slate-800 focus:outline-none text-sm w-full truncate border-b border-slate-300/50 pb-1"
-                                value={process.isCustomProcess ? 'custom' : (availableProcesses.includes(process.processName) ? process.processName : (process.processName ? 'custom' : ''))}
-                                onChange={(e) => {
-                                  setProcesses(prev => prev.map(p => {
-                                    if (p.id === process.id) {
-                                      return e.target.value === 'custom'
-                                        ? { ...p, isCustomProcess: true, processName: '' }
-                                        : { ...p, isCustomProcess: false, processName: e.target.value };
-                                    }
-                                    return p;
-                                  }));
-                                }}
-                              >
-                                <option value="">공정 선택</option>
-                                <option value="custom">✍️ 직접 입력...</option>
-                                {availableProcesses.map((p, i) => (
-                                  <option key={i} value={p}>{p}</option>
-                                ))}
-                              </select>
-                              
-                              {process.isCustomProcess && (
-                                <input 
-                                  type="text" 
-                                  placeholder="공정명 직접 입력" 
-                                  className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-800 focus:outline-blue-500 w-full shadow-sm"
-                                  value={process.processName}
-                                  onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
-                                />
-                              )}
+                            <div className="flex flex-col gap-2 w-48">
+                              <div className="flex flex-col gap-1">
+                                <select 
+                                  className="bg-transparent font-bold text-slate-800 focus:outline-none text-sm w-full truncate border-b border-slate-300/50 pb-1"
+                                  value={process.isCustomProcess ? 'custom' : (availableProcesses.includes(process.processName) ? process.processName : (process.processName ? 'custom' : ''))}
+                                  onChange={(e) => {
+                                    setProcesses(prev => prev.map(p => {
+                                      if (p.id === process.id) {
+                                        return e.target.value === 'custom'
+                                          ? { ...p, isCustomProcess: true, processName: '', subProcessName: '', isCustomSubProcess: false }
+                                          : { ...p, isCustomProcess: false, processName: e.target.value, subProcessName: '', isCustomSubProcess: false };
+                                      }
+                                      return p;
+                                    }));
+                                  }}
+                                >
+                                  <option value="">공정 선택</option>
+                                  <option value="custom">✍️ 직접 입력...</option>
+                                  {availableProcesses.map((p, i) => (
+                                    <option key={i} value={p}>{p}</option>
+                                  ))}
+                                </select>
+                                
+                                {process.isCustomProcess && (
+                                  <input 
+                                    type="text" 
+                                    placeholder="공정명 직접 입력" 
+                                    className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-800 focus:outline-blue-500 w-full shadow-sm"
+                                    value={process.processName}
+                                    onChange={(e) => updateProcess(process.id, 'processName', e.target.value)}
+                                  />
+                                )}
+                              </div>
+
+                              <div className="flex flex-col gap-1 border-t border-slate-200/50 pt-1">
+                                <select 
+                                  className="bg-transparent font-medium text-slate-700 focus:outline-none text-xs w-full truncate border-b border-slate-300/50 pb-1"
+                                  value={process.isCustomSubProcess ? 'custom' : (availableSubProcesses.includes(process.subProcessName) ? process.subProcessName : (process.subProcessName ? 'custom' : ''))}
+                                  onChange={(e) => {
+                                    setProcesses(prev => prev.map(p => {
+                                      if (p.id === process.id) {
+                                        return e.target.value === 'custom'
+                                          ? { ...p, isCustomSubProcess: true, subProcessName: '' }
+                                          : { ...p, isCustomSubProcess: false, subProcessName: e.target.value };
+                                      }
+                                      return p;
+                                    }));
+                                  }}
+                                >
+                                  <option value="">세부 공정 선택</option>
+                                  <option value="custom">✍️ 직접 입력...</option>
+                                  {availableSubProcesses.map((sp, i) => (
+                                    <option key={`sub-${i}`} value={sp}>{sp}</option>
+                                  ))}
+                                </select>
+                                
+                                {process.isCustomSubProcess && (
+                                  <input 
+                                    type="text" 
+                                    placeholder="세부 공정 직접 입력" 
+                                    className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-medium text-slate-800 focus:outline-blue-500 w-full shadow-sm"
+                                    value={process.subProcessName}
+                                    onChange={(e) => updateProcess(process.id, 'subProcessName', e.target.value)}
+                                  />
+                                )}
+                              </div>
                             </div>
                           </div>
                           <button onClick={() => removeProcess(process.id)} className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"><Trash2 className="w-5 h-5" /></button>
@@ -988,7 +1039,6 @@
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               {safePhotos.map((photoItem, pIdx) => {
-                                // 임시 미리보기 URL이 있으면 그걸 보여주고, 없으면 base64 (구조 호환)
                                 const srcStr = typeof photoItem === 'string' ? photoItem : (photoItem.previewUrl || photoItem.base64);
                                 const isUploaded = typeof photoItem === 'object' && photoItem.isUploaded;
                                 const isUploading = typeof photoItem === 'object' && photoItem.isUploading;
@@ -998,28 +1048,20 @@
                                   <div key={pIdx} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex flex-col group">
                                     <img src={srcStr} className="w-full h-full object-cover" />
                                     
-                                    {/* 💡 로딩 인디케이터 (백그라운드 전송 중) 및 취소 버튼 */}
                                     {isUploading && (
                                       <div className="absolute inset-0 bg-slate-900/60 flex flex-col items-center justify-center z-10 backdrop-blur-[2px]">
                                         <RefreshCw className="w-5 h-5 text-white animate-spin mb-1" />
                                         <span className="text-[10px] text-white font-bold mb-1.5">서버 전송 중...</span>
-                                        <button 
-                                          onClick={(e) => { e.stopPropagation(); cancelUpload(process.id, photoItem.id, 'photo'); }}
-                                          className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-[10px] font-bold shadow-md transition-colors"
-                                        >
-                                          취소
-                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); cancelUpload(process.id, photoItem.id, 'photo'); }} className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-[10px] font-bold shadow-md transition-colors">취소</button>
                                       </div>
                                     )}
 
-                                    {/* 에러 상태 */}
                                     {uploadFailed && (
                                       <div className="absolute top-2 left-2 bg-red-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
                                         <AlertCircle className="w-3 h-3" /> 실패(나중에 저장됨)
                                       </div>
                                     )}
 
-                                    {/* 완료 상태 */}
                                     {!isUploading && isUploaded && (
                                       <div className="absolute top-2 left-2 bg-green-500/90 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm backdrop-blur-sm flex items-center gap-1 z-10">
                                         <Cloud className="w-3 h-3" /> 저장됨
@@ -1043,6 +1085,7 @@
                             </div>
                           </div>
 
+                          {/* 2. 작업내용 */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
@@ -1081,6 +1124,7 @@
                             />
                           </div>
 
+                          {/* 3. 작업시간 */}
                           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
                             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1">
                               <span className="text-blue-500">3.</span> 작업시간
@@ -1130,6 +1174,7 @@
                             </div>
                           </div>
 
+                          {/* 4. 작업정보 */}
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
@@ -1296,6 +1341,7 @@
                             </div>
                           </div>
 
+                          {/* 5. 작업부하 및 빈도 평가 (점수 계산 영역) */}
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <label className="block text-sm font-semibold text-slate-800 mb-4 flex items-center">
                               <span className="text-blue-500 mr-1">5.</span> 작업부하 및 작업빈도
@@ -1340,7 +1386,7 @@
                             </div>
                           </div>
 
-                          {/* 6. 동영상 첨부 및 비동기 업로드 */}
+                          {/* 6. 동영상 첨부 */}
                           <div className="pt-2 border-t border-slate-100">
                             <div className="flex items-center justify-between mb-2">
                               <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1"><span className="text-blue-500">6.</span> 현장 동영상 첨부</label>
@@ -1357,7 +1403,6 @@
                                   <div key={vIdx} className="relative aspect-square bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
                                     <video src={srcStr} controls className="w-full h-full object-cover"></video>
                                     
-                                    {/* 💡 동영상 로딩 인디케이터 및 취소 버튼 */}
                                     {isUploading && (
                                       <div className="absolute inset-0 bg-slate-900/60 flex flex-col items-center justify-center z-10 backdrop-blur-[2px]">
                                         <RefreshCw className="w-5 h-5 text-white animate-spin mb-1" />
@@ -1412,7 +1457,8 @@
                   </button>
                 </div>
 
-                {/* 🔥 사진 촬영/첨부 커스텀 팝업 (모달) */}
+                {}
+                {/* 사진 촬영/첨부 모달 */}
                 {photoPopupProcessId && (
                   <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -1424,7 +1470,6 @@
                       </div>
                       <div className="p-4 space-y-3">
                         
-                        {/* 옵션 1: 기본 카메라 바로 실행 */}
                         <label className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
                           <div className="bg-blue-600 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <Camera className="w-6 h-6" />
@@ -1439,13 +1484,12 @@
                             capture="environment" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); // 🔥 논블로킹 함수로 교체
+                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); 
                               setPhotoPopupProcessId(null);
                             }} 
                           />
                         </label>
 
-                        {/* 옵션 2: 갤러리 */}
                         <label className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors shadow-sm">
                           <div className="bg-slate-400 p-2.5 rounded-full text-white shrink-0 shadow-md">
                             <ImageIcon className="w-6 h-6" />
@@ -1459,7 +1503,7 @@
                             accept="image/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); // 🔥 논블로킹 함수로 교체
+                              handleMediaCaptureBackground(e, photoPopupProcessId, 'photo'); 
                               setPhotoPopupProcessId(null);
                             }} 
                           />
@@ -1478,7 +1522,7 @@
                   </div>
                 )}
 
-                {/* 🔥 동영상 촬영/첨부 커스텀 팝업 (모달) */}
+                {/* 동영상 촬영/첨부 모달 */}
                 {videoPopupProcessId && (
                   <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -1503,7 +1547,7 @@
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); 
                               setVideoPopupProcessId(null);
                             }} 
                           />
@@ -1523,7 +1567,7 @@
                             capture="environment" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); 
                               setVideoPopupProcessId(null);
                             }} 
                           />
@@ -1542,7 +1586,7 @@
                             accept="video/*" 
                             className="hidden" 
                             onChange={(e) => {
-                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); // 🔥 논블로킹 함수로 교체
+                              handleMediaCaptureBackground(e, videoPopupProcessId, 'video'); 
                               setVideoPopupProcessId(null);
                             }} 
                           />
