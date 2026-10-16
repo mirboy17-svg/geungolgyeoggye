@@ -442,9 +442,10 @@
 
                     const currentProcess = processes.find(p => p.id === processId);
                     const pName = currentProcess?.processName || '미지정공정';
+                    const subPName = currentProcess?.subProcessName ? `_${currentProcess.subProcessName}` : '';
                     const fileExt = type === 'photo' ? 'jpg' : 'mp4';
                     const catPrefix = category ? `(${category})` : '';
-                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}_${type === 'photo'?'사진':'동영상'}_${tempId.substring(0,4)}.${fileExt}`;
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${pName}${subPName}_${type === 'photo'?'사진':'동영상'}_${tempId.substring(0,4)}.${fileExt}`;
 
                     if (GAS_WEB_APP_URL.includes('여기에_복사한')) {
                         throw new Error("구글 스크립트 URL이 설정되지 않았습니다.");
@@ -572,6 +573,7 @@
                 spreadsheetName: `${catPrefix}${companyName || '미지정사업체'}`,
                 processes: data.map((p, index) => {
                   const processName = p.processName || `미지정_공정_${index + 1}`;
+                  const subProcessNamePart = p.subProcessName ? `_${p.subProcessName}` : '';
                   const formattedWorkTime = `업무: ${p.workTimeStart || '?'}~${p.workTimeEnd || '?'} / 점심: ${p.lunchTimeStart || '?'}~${p.lunchTimeEnd || '?'} / 기타: ${p.workTimeManual}`;
                   
                   const validWorkloads = p.workloads?.filter(item => item.count || item.duration);
@@ -591,7 +593,7 @@
                   
                   // 통신 실패로 아직 올라가지 못한 파일들만 모아서 재전송 큐에 넣기
                   (p.photos || []).forEach((photoItem, i) => {
-                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_사진${i + 1}.jpg`;
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${subProcessNamePart}_사진${i + 1}.jpg`;
                     if (typeof photoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: photoItem });
                     } else if (photoItem && !photoItem.isUploaded && photoItem.base64) {
@@ -599,7 +601,7 @@
                     }
                   });
                   (p.videos || []).forEach((videoItem, i) => {
-                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}_동영상${i + 1}.mp4`;
+                    const fileName = `${catPrefix}${companyName || '미지정사업체'}_${processName}${subProcessNamePart}_동영상${i + 1}.mp4`;
                      if (typeof videoItem === 'string') {
                       mediaQueue.push({ type: 'media', folderId: TARGET_FOLDER_ID, fileName: fileName, fileData: videoItem });
                     } else if (videoItem && !videoItem.isUploaded && videoItem.base64) {
@@ -905,7 +907,7 @@
                         }}
                       >
                         <option value="">선택</option>
-                        {['정', '이', '박', '김', '조', '안', '윤', '강', '서'].map(c => (
+                        {['정', '이', '박', '김', '조', '안', '윤', '강', '서', '전'].map(c => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
